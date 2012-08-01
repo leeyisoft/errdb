@@ -178,7 +178,8 @@ handle_cast({write, Key, Rows}, #state{dbdir = Dir} = State) ->
 				NewHead = alter_rrdb(File, Head, Names),
 				write_rrdb(File, NewHead, Columns);
 			{error, Error} ->
-				?ERROR("check columns error: ~p", [Error])
+				?ERROR("check columns error: ~p", [Error]),
+				?ERROR("error key: ~s", [Key])
 			end;
 		{error, nofile} ->
 			create_rrdb(File, Columns);
