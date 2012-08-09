@@ -10,6 +10,10 @@
 
 -compile(export_all).
 
+cluster_info() ->
+    Nodes = [node()|nodes()],
+    ?PRINT("cluster nodes: ~p~n", [Nodes]).
+
 cluster(Node) ->
 	case net_adm:ping(list_to_atom(Node)) of
 	pong ->

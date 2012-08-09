@@ -220,17 +220,18 @@ handle_cast({insert, Key, Time, Metrics}, #state{dbtab = DbTab,
 	timeout = Timeout, threshold = Threshold} = State) ->
     Result =
     case ets:lookup(DbTab, Key) of
-    [#errdb{last=Last, rows=List, timer=Timer} = OldRecord] ->
+    [#errdb{last=Last, rows=Rows, timer=Timer} = OldRecord] ->
         case check_time(Last, Time) of
         true ->
-            case length(List) >= (CacheSize+Threshold) of
+            case length(Rows) >= (CacheSize+Threshold) of
             true ->
 				NewTimer = reset_timer(Timer, Key, Timeout),
-                errdb_store:write(Store, Key, reverse(List)),
+                Columns = errdb_lib:transform(reverse(Rows)),
+                errdb_store:write(Store, Key, Columns),
                 {ok, OldRecord#errdb{first = Time, last = Time, 
 					timer = NewTimer, rows = [{Time, Metrics}]}};
             false ->
-                {ok, OldRecord#errdb{last = Time, rows = [{Time, Metrics}|List]}}
+                {ok, OldRecord#errdb{last = Time, rows = [{Time, Metrics}|Rows]}}
             end;
         false ->
             ?WARNING("key: ~p, badtime: time=~p =< last=~p", [Key, Time, Last]),

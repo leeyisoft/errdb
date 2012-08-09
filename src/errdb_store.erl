@@ -125,8 +125,8 @@ get_ds(Field, #rrdb_head{dslist=DsList}) ->
 get_ds_pos(#rrdb_ds{idx = Idx}) ->
 	?HEAD_SIZE + Idx * ?PAGE_SIZE.
     
-write(Pid, Key, Rows) when length(Rows) > 0 ->
-    gen_server2:cast(Pid, {write, Key, Rows}).
+write(Pid, Key, Columns) when length(Columns) > 0 ->
+    gen_server2:cast(Pid, {write, Key, Columns}).
 
 delete(Pid, Key) ->
     gen_server2:cast(Pid, {delete, Key}).
@@ -163,12 +163,11 @@ priorities_call(_, _From, _State) ->
 %%                                      {stop, Reason, State}
 %% Description: Handling cast messages
 %%--------------------------------------------------------------------
-handle_cast({write, Key, Rows}, #state{dbdir = Dir} = State) ->
+handle_cast({write, Key, Columns}, #state{dbdir = Dir} = State) ->
     FileName = filename(Dir, Key),
     filelib:ensure_dir(FileName),
     case file:open(FileName, [read, write | ?OPEN_MODES]) of
 	{ok, File} ->
-		Columns = errdb_lib:transform(Rows),
 		case read_head(File) of
 		{ok, Head} ->
 			case check_columns(Head, Columns) of
@@ -211,10 +210,13 @@ code_change(_OldVsn, State, _Extra) ->
 %%--------------------------------------------------------------------
 %%% Key: dn:grp
 %%--------------------------------------------------------------------
-filename(Dir, Key) ->
-    Path = binary:replace(list_to_binary(Key), 
-		[<<",">>, <<":">>], <<"/">>, [global]),
-    concat([Dir, "/", binary_to_list(Path), ".rrdb"]).
+filename(Dir, Key) when is_list(Key) ->
+    filename(Dir, list_to_binary(Key));
+
+filename(Dir, Key) when is_binary(Key) ->
+    SubDir = integer_to_list(erlang:phash2(Key, 256)),
+    Path = binary:replace(Key, [<<",">>, <<":">>], <<"/">>, [global]),
+    concat([Dir, "/", SubDir, "/", binary_to_list(Path), ".rrdb"]).
 
 create_rrdb(_File, Columns) when length(Columns) > ?MAX_COLUMNS ->
 	?ERROR("too many columns: ~p, cannot create rrdb file!", [length(Columns)]);
