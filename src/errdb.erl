@@ -129,7 +129,7 @@ init([Id, Opts]) ->
         named_table, {keypos, 2}]),
 
     chash_pg:create(errdb),
-    chash_pg:join(errdb, self(), VNodes),
+    chash_pg:join(errdb, self(), name(Id), VNodes),
 
     CacheSize = proplists:get_value(cache, Opts),
     ?INFO("~p is started.~n ", [name(Id)]),
