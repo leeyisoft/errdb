@@ -34,7 +34,7 @@ handle('GET', {"rrdb", Key, "last"}, Req) ->
         Resp = ["TIME:", join(Fields, ","), "\n", errdb_lib:line(Time, Values)],
         Req:ok({"text/plain", Resp});
     {error, Reason} ->
-		?ERROR("~p", [Reason]),
+		?WARNING("~s ~p", [Req:get(raw_path), Reason]),
         Req:respond({500, [], atom_to_list(Reason)})
 	end;
 
@@ -46,7 +46,7 @@ handle('GET', {"rrdb", RawKey, "last", RawFields}, Req) ->
         Resp = ["TIME:", Fields, "\n", errdb_lib:line(Time, Values)],
         Req:ok({"text/plain", Resp});
     {error, Reason} ->
-		?ERROR("~p", [Reason]),
+		?WARNING("~s ~p", [Req:get(raw_path), Reason]),
         Req:respond({500, [], atom_to_list(Reason)})
 	end;
 
@@ -62,10 +62,10 @@ handle('GET', {"rrdb", RawKey, RawFields, RawRange}, Req) ->
         Resp = ["TIME:", Fields, "\n", Lines],
         Req:ok({"text/plain", Resp});
     {error, Reason} ->
-		?ERROR("~p", [Reason]),
+		?WARNING("~s ~p", [Req:get(raw_path), Reason]),
         Req:respond({500, [], atom_to_list(Reason)})
 	end;
 
 handle(_Other, _Path, Req) ->
-	Req:respond({500, [], <<"unsupported request">>}). 
+	Req:respond({404, [], <<"bad request, path not found.">>}). 
 

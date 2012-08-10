@@ -74,7 +74,7 @@ fetch(Key, Fields, Begin, End) when
 	Pid = chash_pg:get_pid(?MODULE, Key),
     case gen_server2:call(Pid, {fetch, Key, Fields}) of
 	{ok, DataInMem, DbDir} -> 
-		case errdb_store:read(DbDir, Key, Fields) of
+		case rpc:call(node(Pid), errdb_store, read, [DbDir, Key, Fields]) of
 		{ok, DataInFile} ->
 			Filter = fun(L) -> filter(Begin, End, L) end,
 			YData = [{Field, Filter(Values)} || {Field, Values} 

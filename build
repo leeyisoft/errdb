@@ -4,4 +4,33 @@ DATE=`date +%Y%m%d`
 
 cd ..
 
-tar czvf errdb/errdb-2.0.6-$DATE.tgz errdb/bin errdb/ebin errdb/etc errdb/lib/elog/ebin errdb/lib/extlib/ebin errdb/lib/lager/ebin errdb/lib/mochiweb/ebin  errdb/log errdb/var errdb/README.md
+case "$1" in
+    ipkg) 
+        tar czvf errdb/errdb-2.0.7-$DATE-$1.tgz \
+            errdb/README.md \
+            errdb/ebin \
+            errdb/bin errdb/etc \
+            errdb/log errdb/var \
+            errdb/lib/elog/ebin \
+            errdb/lib/extlib/ebin \
+            errdb/lib/lager/ebin \
+            errdb/lib/mochiweb/ebin  \
+            errdb/lib/evmon/ebin
+        ;;
+    upkg) 
+        tar czvf errdb/errdb-2.0.7-$DATE-$1.tgz \
+            errdb/ebin \
+            errdb/bin \
+            errdb/lib/elog/ebin \
+            errdb/lib/extlib/ebin \
+            errdb/lib/lager/ebin \
+            errdb/lib/mochiweb/ebin  \
+            errdb/lib/evmon/ebin
+        ;;
+    *)
+        echo "Usage: $SCRIPT {ipkg | upkg}"
+        ;;
+esac
+
+exit 0
+

@@ -76,6 +76,24 @@ case "$1" in
         $NODETOOL rpc errdb_ctl status $@
         ;;
 
+    cluster_info)
+        if [ $# -ne 1 ]; then
+            echo "Usage: $SCRIPT cluster_info"
+            exit 1
+        fi
+
+        # Make sure the local node IS running
+        RES=`$NODETOOL ping`
+        if [ "$RES" != "pong" ]; then
+            echo "Node is not running!"
+            exit 1
+        fi
+        shift
+
+        $NODETOOL rpc errdb_ctl cluster_info $@
+        ;;
+
+
     cluster)
         if [ $# -ne 2 ]; then
             echo "Usage: $SCRIPT cluster <Node>"
@@ -96,6 +114,7 @@ case "$1" in
     *)
         echo "Usage: $SCRIPT"
 		echo "		status       	#query errdb status"
+		echo "		cluster_info    #query cluster nodes"
 		echo "		cluster <Node>	#cluster node"
         exit 1
         ;;
