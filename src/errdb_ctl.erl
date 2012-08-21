@@ -10,6 +10,10 @@
 
 -compile(export_all).
 
+sockets() ->
+    ActiveSockets = mochiweb_socket_server:get(errdb_socket, active_sockets),
+    ?PRINT("Total Client Sockets: ~p~n", [ActiveSockets]).
+
 cluster_info() ->
     Nodes = [node()|nodes()],
     ?PRINT("cluster nodes: ~p~n", [Nodes]).
