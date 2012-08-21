@@ -1,3 +1,5 @@
+2012-08-10 release v2.0.9(erylee): add errdb_ctl:sockets
+
 2012-08-10 release v2.0.8(erylee): fix nodes cluster bugs
 
 2012-06-01 release v2.0.7(erylee): errdb_http.erl replace 'get(path)' with 'get(raw_path)'
