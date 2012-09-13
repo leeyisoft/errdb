@@ -2,11 +2,13 @@
 
 DATE=`date +%Y%m%d`
 
+VSN=2.0.9
+
 cd ..
 
 case "$1" in
     ipkg) 
-        tar czvf errdb/errdb-2.0.8-$DATE-$1.tgz \
+        tar czvf errdb/errdb-$VSN-$DATE-$1.tgz \
             errdb/README.md \
             errdb/ebin \
             errdb/bin errdb/etc \
@@ -18,7 +20,7 @@ case "$1" in
             errdb/lib/evmon/ebin
         ;;
     upkg) 
-        tar czvf errdb/errdb-2.0.8-$DATE-$1.tgz \
+        tar czvf errdb/errdb-$VSN-$DATE-$1.tgz \
             errdb/ebin \
             errdb/bin \
             errdb/lib/elog/ebin \
