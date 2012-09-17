@@ -135,7 +135,6 @@ init([Id]) ->
 handle_call(info, _From, #state{store=Store, journal=Journal} = State) ->
     Reply = [errdb_misc:pinfo(self()), 
             errdb_misc:pinfo(Store),
-            errdb_store:info(Store),
             errdb_misc:pinfo(Journal)],
     {reply, Reply, State};
     
