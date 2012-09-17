@@ -5,7 +5,7 @@
 %%% Created : 03 Jun. 2011
 %%% License : http://www.opengoss.com/license
 %%%
-%%% Copyright (C) 2011, www.opengoss.com
+%%% Copyright (C) 2012, www.opengoss.com
 %%%----------------------------------------------------------------------
 -module(errdb_sup).
 
@@ -26,8 +26,7 @@ init([]) ->
 	{ok, Val} when is_integer(Val) -> Val;
 	undefined -> erlang:system_info(schedulers)
 	end,
-    {ok, Opts} = application:get_env(rrdb),
-    Errdbs = [worker(Id, Opts) || Id <- lists:seq(1, Pool)],
+    Errdbs = [worker(Id) || Id <- lists:seq(1, Pool)],
 
 	%% Httpd config
 	{ok, HttpdConf} = application:get_env(httpd), 
@@ -43,7 +42,7 @@ init([]) ->
 
     {ok, {{one_for_one, 10, 1000}, Errdbs ++ [Httpd, Socket]}}.
 
-worker(Id, Opts) ->
-	{errdb:name(Id), {errdb, start_link, [Id, Opts]},
+worker(Id) ->
+	{errdb:name(Id), {errdb, start_link, [Id]},
 	   permanent, 5000, worker, [errdb]}.
 

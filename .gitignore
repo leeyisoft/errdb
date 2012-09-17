@@ -13,3 +13,4 @@ lib/extlib
 lib/lager
 lib/evmon
 log/*
+var

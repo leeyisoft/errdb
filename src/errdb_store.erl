@@ -2,7 +2,7 @@
 %%% File    : errdb_store.erl
 %%% Author  : Ery Lee <ery.lee@gmail.com>
 %%% Purpose : File Storage
-%%% Created : 03 Apr. 2010
+%%% Created : 03 Apr. 2012
 %%% License : http://www.opengoss.com
 %%%
 %%% Copyright (C) 2012, www.opengoss.com
@@ -19,13 +19,15 @@
 
 -import(lists, [concat/1, reverse/1]).
 
+-import(proplists, [get_value/3]).
+
 -behavior(gen_server).
 
--export([start_link/2,
+-export([start_link/1,
+        info/1,
 		name/1,
-        read/3, 
-        write/3,
-        delete/2]).
+        read/4, 
+        write/3]).
 
 -export([init/1, 
         handle_call/3, 
@@ -35,101 +37,62 @@
         terminate/2,
         code_change/3]).
 
--define(RRDB_VER, <<"RRDB0002">>).
+-define(DAY, 86400).
 
--define(HEAD_SIZE, 4096).
+-define(RRDB_VER, <<"RRDB0003">>).
 
--define(DS_NAME_SIZE, 24).
+-define(OPEN_MODES, [binary, raw, {read_ahead, 1024}]).
 
--define(DS_HEAD_SIZE, (?DS_NAME_SIZE+21)).
+%index: {ref, file}
+%data: {fd, file}
+-record(db, {name, index, data}).
 
--define(MAX_COLUMNS, 80).
-
--define(PAGE_ROWS, 600).
-
--define(PAGE_START, 4096).
-
--define(PAGE_SIZE, (?PAGE_ROWS*12)).
-
--define(OPEN_MODES, [binary, raw, {read_ahead, 4096}]).
-
--record(state, {dbdir}).
-
--record(rrdb_head, {ver = ?RRDB_VER, dscnt, dslist}).
-
--record(rrdb_ds, {name, idx, rowptr=0, lastup=0, lastval=0.0}).
+-record(state, {id, name, buffer, dir, today, days = 3, db, hdbs=[], queue=[]}).
 
 %%--------------------------------------------------------------------
 %% Function: start_link() -> {ok,Pid} | ignore | {error,Error}
 %% Description: Starts the server
 %%--------------------------------------------------------------------
-start_link(Id, Dir) ->
-    gen_server2:start_link({local, name(Id)}, ?MODULE, [Id, Dir],
+start_link(Id) ->
+    gen_server2:start_link({local, name(Id)}, ?MODULE, [Id],
 		[{spawn_opt, [{min_heap_size, 204800}]}]).
 
 name(Id) ->
     list_to_atom("errdb_store_" ++ integer_to_list(Id)).
 
-read(DbDir, Key, Fields) ->
-	case file:open(filename(DbDir, Key), [read | ?OPEN_MODES]) of
-	{ok, File} ->
-		case read_head(File) of
-		{ok, Head} -> 
-			case check_fields(Fields, Head#rrdb_head.dslist) of
-			ok -> 
-				{ok, read_data(File, Head, Fields)};
-			Error -> 
-				Error
-			end;
-		Error -> 
-			Error
-		end;
-	{error, enoent} ->
-		{ok, []};
-    {error, Error} -> 
-        {error, Error}
-	end.
+read(Pid, Key, Begin, End) ->
+    case gen_server:call(Pid, {read, Key, Begin, End}) of
+    {ok, IdxList} ->
+        DataList = 
+        lists:map(fun({DataFile, Indices}) -> 
+            case file:open(DataFile, [read | ?OPEN_MODES]) of
+            {ok, Fd} ->
+                case file:pread(Fd, Indices) of
+                {ok, DataL} ->
+                    {ok, [binary_to_term(Data) || Data <- DataL]};
+                eof -> 
+                    {ok, []};
+                {error, Reason} -> 
+                    ?ERROR("pread ~p error: ~p", [DataFile, Reason]),
+                    {error, Reason}
+                end;
+            {error, eof} ->
+                {ok, []};
+            {error, Reason1} ->
+                ?ERROR("open ~p error: ~p", [DataFile, Reason1]),
+                {error, Reason1}
+            end
+        end, IdxList),
+        {ok, lists:flatten([Rows || {ok, Rows} <- DataList])};
+    {error, Reason} ->
+        {error, Reason}
+    end.
 
-check_fields([], _DsList) ->
-	ok;
-check_fields([F|Fields], DsList) ->
-	case lists:keysearch(F, 2, DsList) of
-	{value, _} -> check_fields(Fields, DsList);
-	false -> {error, badfield}
-	end.
-	
-read_head(File) ->
-	case file:read(File, 4096) of
-    {ok, <<"RRDB0002", _/binary>> = HeadData} ->
-		{ok, decode_head(HeadData)};
-	{ok, _} ->
-		{error, badhead};
-	eof ->
-		{error, nofile};
-	{error, Reason} ->
-		{error, Reason}
-	end.
+write(Pid, Key, Rows) when length(Rows) > 0 ->
+    gen_server2:cast(Pid, {write, Key, Rows}).
 
-read_data(File, Head, Fields) ->
-	Reads = [ {get_ds_pos(Ds), ?PAGE_SIZE} || 
-		Ds <- [get_ds(F, Head) || F <- Fields] ],
-	{ok, Pages} = file:pread(File, Reads),
-	lists:zip(Fields, [decode_page(Page) || Page <- Pages]).
-
-get_ds(Field, #rrdb_head{dslist=DsList}) ->
-	case lists:keysearch(Field, 2, DsList) of
-	{value, Ds} -> Ds;
-	false -> false
-	end.
-
-get_ds_pos(#rrdb_ds{idx = Idx}) ->
-	?HEAD_SIZE + Idx * ?PAGE_SIZE.
-    
-write(Pid, Key, Columns) when length(Columns) > 0 ->
-    gen_server2:cast(Pid, {write, Key, Columns}).
-
-delete(Pid, Key) ->
-    gen_server2:cast(Pid, {delete, Key}).
+info(Pid) ->
+    gen_server2:call(Pid, info).
 
 %%--------------------------------------------------------------------
 %% Function: init(Args) -> {ok, State} |
@@ -138,9 +101,74 @@ delete(Pid, Key) ->
 %%                         {stop, Reason}
 %% Description: Initiates the server
 %%--------------------------------------------------------------------
-init([Id, DbDir]) ->
+
+init([Id]) ->
+	random:seed(now()),
+    put(write_time, 0),
+    put(write_count, 0),
+    {ok, Opts} = application:get_env(store),
+    Days = get_value(days, Opts, 3),
+    Buffer = get_value(buffer, Opts, 20),
+    Dir = get_value(dir, Opts, "var/data"),
+	DbDir = lists:concat([Dir, "/", zeropad(Id)]),
+    Now = extbif:timestamp(),
+    Today = (Now div ?DAY),
+    DB = open(db, DbDir, Now, Id),
+    HDBS = [open(hdb, DbDir, ago(Now, I), Id)
+                || I <- lists:seq(1, Days-1)],
+
+    %schedule daily rotation
+    sched_daily_rotate(),
+
+    %flush queue to disk
+    erlang:send_after(Id*3000, self(), flush_queue),
+    
     ?INFO("~p is started.", [name(Id)]),
-    {ok, #state{dbdir = DbDir}}.
+    {ok, #state{id = Id, name = name(Id), dir = DbDir, 
+                buffer = Buffer+random:uniform(Buffer), 
+                today = Today, days = Days,
+                db = DB, hdbs = HDBS}}.
+
+ago(Ts, I) ->
+    Ts - (I * ?DAY).
+
+open(Type, Dir, Ts, Id) ->
+    Name = dbname(Id, Ts),
+    IdxFile = idxfile(Dir, Name),
+    DataFile = datafile(Dir, Name),
+    case {Type, filelib:is_file(DataFile)} of
+    {db, true} ->
+        opendb(Name, IdxFile, DataFile);
+    {db, false} ->
+        filelib:ensure_dir(DataFile),
+        opendb(Name, IdxFile, DataFile);
+    {hdb, true}->
+        opendb(Name, IdxFile, DataFile);
+    {hdb, false} ->
+        undefined
+    end.
+
+opendb(Name, IdxFile, DataFile) ->
+    ?INFO("opendb ~s ", [Name]),
+    IdxRef = list_to_atom("index_"++Name),
+    {ok, IdxRef} = dets:open_file(IdxRef, [{file, IdxFile}, {type, bag}]),
+    {ok, DataFd} = file:open(DataFile, [read, write, append | ?OPEN_MODES]),
+	case file:read(DataFd, 8) of
+    {ok, ?RRDB_VER} -> ok;
+    eof -> file:write(DataFd, ?RRDB_VER)
+    end,
+    #db{name = list_to_atom(Name),
+        index = {IdxRef, IdxFile},
+        data = {DataFd, DataFile}}.
+
+dbname(Id, Ts) ->
+    zeropad(Id) ++ integer_to_list(Ts div ?DAY).
+
+idxfile(Dir, Name) ->
+    lists:concat([Dir, "/", Name, ".idx"]).
+
+datafile(Dir, Name) ->
+    lists:concat([Dir, "/", Name, ".data"]).
 
 %%--------------------------------------------------------------------
 %% Function: %% handle_call(Request, From, State) -> {reply, Reply, State} |
@@ -151,9 +179,36 @@ init([Id, DbDir]) ->
 %%                                      {stop, Reason, State}
 %% Description: Handling call messages
 %%--------------------------------------------------------------------
+handle_call(info, _From, State) ->
+    WCount = get(write_count),
+    Write = get(write_time),
+    Reply = [{write_count, WCount},
+             {write_time, Write}],
+    Reply1 =
+    if
+    WCount > 0 -> 
+        [{write_avg, Write div WCount} | Reply];
+    true -> 
+        Reply
+    end,
+    {reply, Reply1, State};
+
+handle_call({read, Key, Begin, End}, _From, #state{db = DB, hdbs = HDBS} = State) ->
+    %beginIdx is bigger than endidx
+    {BeginIdx, EndIdx} = dayidx(Begin, End, State),
+    DbInRange = lists:sublist([DB|HDBS], EndIdx, (BeginIdx-EndIdx+1)), 
+    IdxList = [{DataFile, [Idx || {_K, Idx} <- dets:lookup(IdxRef, Key)]} 
+                    || #db{index={IdxRef, _}, data={_, DataFile}} <- DbInRange],
+    Reply = {ok, [ E || {_, Indices} = E <- IdxList, Indices =/= []]},
+    {reply, Reply, State};
+
 handle_call(Req, _From, State) ->
     {stop, {error, {badreq, Req}}, State}.
 
+priorities_call(info, _From, _State) ->
+    10;
+priorities_call({read, _Key, _Begin, _End}, _From, _State) ->
+    10;
 priorities_call(_, _From, _State) ->
     0.
 
@@ -163,178 +218,128 @@ priorities_call(_, _From, _State) ->
 %%                                      {stop, Reason, State}
 %% Description: Handling cast messages
 %%--------------------------------------------------------------------
-handle_cast({write, Key, Columns}, #state{dbdir = Dir} = State) ->
-    FileName = filename(Dir, Key),
-    filelib:ensure_dir(FileName),
-    case file:open(FileName, [read, write | ?OPEN_MODES]) of
-	{ok, File} ->
-		case read_head(File) of
-		{ok, Head} ->
-			case check_columns(Head, Columns) of
-			{ok, same} ->
-				write_rrdb(File, Head, Columns);
-			{ok, alter, Names} ->
-				NewHead = alter_rrdb(File, Head, Names),
-				write_rrdb(File, NewHead, Columns);
-			{error, Error} ->
-				?ERROR("check columns error: ~p", [Error]),
-				?ERROR("error key: ~s", [Key])
-			end;
-		{error, nofile} ->
-			create_rrdb(File, Columns);
-		{error, Error} ->
-			?ERROR("failed to read head: ~p", [Error])
-		end,
-		file:close(File);
-	{error, Reason} -> 
-        ?ERROR("failed to open '~p': ~p", [FileName, Reason])
-	end,
-    {noreply, State};
+handle_cast({write, Key, Rows}, #state{db=DB, buffer=Buffer, queue=Queue} = State) ->
+    case length(Queue) >= Buffer of
+    true ->
+        %FIXME LATER:
+        T1 = now(),
+        flush_to_disk(DB, lists:reverse(Queue)),
+        T2 = now(),
+        incr(write_count, 1),
+        incr(write_time, timer:now_diff(T2, T1)),
+        {noreply, State#state{queue=[]}};
+    false ->
+        NewQueue = [{Key, Rows}|Queue],
+        {noreply, State#state{queue=NewQueue}}
+    end;
 
-handle_cast({delete, Key}, #state{dbdir = Dir} = State) ->
-    file:del_dir(filename(Dir, Key)),
-    {noreply, State};
-    
 handle_cast(Msg, State) ->
     {stop, {error, {badcast, Msg}}, State}.
+
+handle_info(flush_queue, #state{db=DB, queue=Queue} = State) ->
+    case length(Queue) > 0 of
+    true ->
+        %FIXME LATER:
+        T1 = now(),
+        flush_to_disk(DB, lists:reverse(Queue)),
+        T2 = now(),
+        incr(write_count, 1),
+        incr(write_time, timer:now_diff(T2,T1));
+    false ->
+        ignore
+    end,
+    erlang:send_after(1000, self(), flush_queue),
+    {noreply, State#state{queue=[]}};
+
+handle_info(rotate, #state{id = Id, dir = DbDir, db=OldDB, hdbs = HDBS} = State) ->
+    %create new db
+    Now = extbif:timestamp(),
+    Today = (Now div ?DAY),
+    NewDB = open(db, DbDir, Now, Id),
+    %close oldest db
+    close(lists:last(HDBS), deleted),
+    NewHDBS = [OldDB | lists:sublist(HDBS, 1, length(HDBS)-1)],
+    %rotation 
+    sched_daily_rotate(),
+    {noreply, State#state{today = Today, db = NewDB, hdbs = NewHDBS}};
 
 handle_info(Info, State) ->
     {stop, {error, {badinfo, Info}}, State}.
 
-terminate(_Reason, _State) ->
+terminate(_Reason, #state{db = DB, hdbs = HDBS }) ->
+    [close(R, normal) || R <- [ DB | HDBS ]],
     ok.
+
+%[d, d-1, d-2,...,d-n]
+%EndIdx....BeginIdx
+dayidx(Begin, End, #state{today=Today, days=Days}) ->
+    BeginDay = Begin div ?DAY,
+    EndDay = End div ?DAY,
+
+    EndDelta = Today - EndDay,
+    EndIdx=
+    if
+    EndDelta =< 0 -> 1;
+    true -> EndDelta+1
+    end,
+
+    BeginDelta = Today - BeginDay,
+    BeginIdx = 
+    if
+    BeginDelta =< 0 -> 1;
+    BeginDelta > Days -> Days; %only two days
+    BeginDelta -> BeginDelta+1
+    end,
+    {BeginIdx, EndIdx}.
+
+close(undefined, _) -> ok;
+close(#db{index={IdxRef, IdxFile}, data={DataFd, DataFile}}, Type) ->
+    dets:close(IdxRef),
+    file:close(DataFd),
+    case Type of
+    delete ->
+        spawn(fun() -> 
+            [begin 
+                Res = file:delete(File),
+                ?INFO("delete ~s: ~p", [File, Res]) 
+             end || File <- [DataFile, IdxFile]]
+        end);
+    _ ->
+        ok
+    end.
 
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 
-%%--------------------------------------------------------------------
-%%% Key: dn:grp
-%%--------------------------------------------------------------------
-filename(Dir, Key) when is_list(Key) ->
-    filename(Dir, list_to_binary(Key));
+flush_to_disk(DB, Queue) ->
+    #db{index={IdxRef, _}, data={DataFd, _}} = DB,
+    {ok, Pos} = file:position(DataFd, eof),
+    {_, Indices, DataList} = 
+    lists:foldl(fun({Key, Rows}, {PosAcc, IdxAcc, DataAcc})  -> 
+        Data = term_to_binary(Rows, [compressed]),        
+        Size = size(Data),
+        Idx = {Key, {PosAcc, Size}},
+        {PosAcc+Size, [Idx|IdxAcc], [Data|DataAcc]}
+    end, {Pos, [], []}, Queue),
+    Data = list_to_binary(lists:reverse(DataList)),
+    case file:write(DataFd, Data) of
+    ok ->
+        dets:insert(IdxRef, Indices);
+    {error, Reason} ->
+        ?ERROR("~p", [Reason])
+    end.
 
-filename(Dir, Key) when is_binary(Key) ->
-    SubDir = integer_to_list(erlang:phash2(Key, 256)),
-    Path = binary:replace(Key, [<<",">>, <<":">>], <<"/">>, [global]),
-    concat([Dir, "/", SubDir, "/", binary_to_list(Path), ".rrdb"]).
+sched_daily_rotate() ->
+    Ts1 = extbif:timestamp(),
+    Ts2 = (Ts1 div ?DAY + 1) * ?DAY,
+    Delta = (Ts2 + 1 - Ts1) * 1000,
+    erlang:send_after(Delta, self(), rotate).
 
-create_rrdb(_File, Columns) when length(Columns) > ?MAX_COLUMNS ->
-	?ERROR("too many columns: ~p, cannot create rrdb file!", [length(Columns)]);
-
-create_rrdb(File, Columns) ->
-	?DEBUG("create rrdb with data: ~n~p", [Columns]),
-	{DsCnt, DsList, Writes} =
-	lists:foldl(fun({Col, Values}, {Idx, DsAcc, WirteAcc}) -> 
-		SortedValues = lists:sort(Values),
-		{LastUp, LastVal} = lists:last(SortedValues),
-		Ds = #rrdb_ds{name = Col, idx = Idx, 
-			rowptr = length(Values),
-			lastup = LastUp,
-			lastval = LastVal}, 
-		PagePos = ?PAGE_START+Idx*?PAGE_SIZE,
-		PageData = encode_value(SortedValues),
-		Write = {PagePos, PageData},
-		{Idx+1, [Ds|DsAcc], [Write|WirteAcc]}
-	end, {0, [], []}, Columns),
-	Head = #rrdb_head{ver = <<"RRDB0002">>, dscnt = DsCnt,
-					dslist = lists:reverse(DsList)},
-	file:write(File, encode_head(Head)),
-	file:pwrite(File, Writes).
-
-alter_rrdb(File, Head, Names) ->
-	#rrdb_head{dscnt = DsCnt, dslist=DsList} = Head,
-	NewDs = fun(Idx) -> #rrdb_ds{name=lists:nth(Idx, Names), idx=DsCnt+Idx-1} end,
-	NewDsCnt = DsCnt + length(Names), 
-	NewDsList = [ NewDs(I) || I <- lists:seq(1, length(Names)) ],
-
-	NewDsPos = 16 + ?DS_HEAD_SIZE * DsCnt,
-	NewDsData = list_to_binary([encode_ds(Ds) || Ds <- NewDsList]),
-	Writes = [{12, <<NewDsCnt:32>>}, {NewDsPos, NewDsData}],
-	file:pwrite(File, Writes),
-	Head#rrdb_head{dscnt = NewDsCnt, dslist=DsList++NewDsList}.
-
-check_columns(#rrdb_head{dslist=DsList}, Columns) ->
-	OldCols = [Name || #rrdb_ds{name=Name} <- DsList],
-	NewCols = [Name || {Name, _} <- Columns],
-	case NewCols -- OldCols of
-	[] -> 
-		{ok, same};
-	Added when length(Added) =< (length(OldCols) div 2) ->
-		{ok, alter, Added};
-	Added ->
-		{error, {too_many_changed, Added}}
-	end.
-
-write_rrdb(File, Head, Columns) ->
-	Fields = [Name || {Name,_} <- Columns],
-	DsList = [get_ds(F, Head) || F <- Fields],
-	{HeadWrites, DataWrites} = 
-	lists:foldl(fun(Ds, {HeadAcc, DataAcc}) -> 
-		#rrdb_ds{name=Name,idx=Idx,rowptr=RowPtr} = Ds,
-		Values = lists:sort(proplists:get_value(Name, Columns)), 
-		{LastUp, LastVal} = lists:last(Values),
-		{NewRowPtr, PageWrites} = write_page(Idx, RowPtr, Values),
-		DsLoc = ds_head_pos(Idx) + 1 + ?DS_NAME_SIZE + 4,
-		DsData = <<NewRowPtr:32, LastUp:32, LastVal:64/float>>,
-		{[{DsLoc, DsData}|HeadAcc], [PageWrites|DataAcc]}
-	end, {[], []}, DsList),
-	file:pwrite(File, HeadWrites),
-	file:pwrite(File, lists:flatten(DataWrites)).
-
-write_page(Idx, RowStart, Values) ->
-	Length = length(Values),
-	RowEnd = RowStart + Length,
-	PagePos = ?PAGE_START + Idx * ?PAGE_SIZE,
-	RowPos = PagePos + RowStart*12,
-	if
-	RowEnd < ?PAGE_ROWS ->
-		{RowEnd, [{RowPos, encode_value(Values)}]};
-	true ->
-		OverLen = RowEnd - ?PAGE_ROWS,
-		Writes = [{PagePos, encode_value(lists:sublist(Values, Length-OverLen, OverLen))},
-				  {RowPos, encode_value(lists:sublist(Values, Length-OverLen))}],
-		{OverLen, Writes}
-	end.
-
-decode_head(HeadData) ->
-    <<"RRDB0002", 0:32, DsCnt:32, DsHead/binary>> = HeadData,
-	DsList = [decode_ds(I, DsHead) || I <- lists:seq(0, DsCnt-1)],
-	#rrdb_head{dscnt = DsCnt, dslist = DsList}.
-
-decode_ds(I, DsHeadData) ->
-	Offset = I*?DS_HEAD_SIZE,
-	<<_:Offset/binary, DsData:45/binary,_/binary>> = DsHeadData,
-	<<NameLen, NameData:?DS_NAME_SIZE/binary, Idx:32, RowPtr:32,LastUp:32,LastVal:64/float>> = DsData,
-	<<Name:NameLen/binary, _/binary>> = NameData,
-	#rrdb_ds{name = binary_to_list(Name), idx = Idx, rowptr = RowPtr, lastup = LastUp, lastval = LastVal}.
-
-decode_page(Page) ->
-	decode_page(Page, []).
-
-decode_page(<<0:32,_/binary>>, Acc) ->
-	reverse(Acc);
-decode_page(<<>>, Acc) ->
-	reverse(Acc);
-decode_page(<<Time:32,Value/float,Data/binary>>, Acc) ->
-	decode_page(Data, [{Time, Value}|Acc]).
-
-encode_head(#rrdb_head{ver=Ver, dscnt=DsCnt, dslist=DsList}) ->
-	DsHead = list_to_binary([encode_ds(Ds) || Ds <- DsList]),
-	<<Ver/binary, 0:32, DsCnt:32, DsHead/binary>>.
-
-encode_ds(#rrdb_ds{name=Name,idx=Idx,rowptr=Row,lastup=Up,lastval=Val}) ->
-	NameBin = list_to_binary(Name),
-	NameLen = size(NameBin),
-	ZeroLen = (?DS_NAME_SIZE - NameLen) * 8,
-	<<NameLen, NameBin/binary,0:ZeroLen,Idx:32,Row:32,Up:32,Val:64/float>>.
-
-encode_value(List) when is_list(List) ->
-	list_to_binary([encode_value(One) || One <- List]);
-
-encode_value({T, V}) ->
-	<<T:32,V:64/float>>.
-
-ds_head_pos(Idx) ->
-	16 + ?DS_HEAD_SIZE * Idx.
-
+incr(Key, Val) ->
+    NewVal =
+    case get(Key) of
+    undefined -> Val;
+    OldVal -> OldVal + Val
+    end,
+    put(Key, NewVal).
 

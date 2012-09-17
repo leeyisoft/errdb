@@ -5,17 +5,13 @@
 %%% Created : 03 Apr. 2010
 %%% License : http://www.opengoss.com
 %%%
-%%% Copyright (C) 2011, www.opengoss.com
+%%% Copyright (C) 2012, www.opengoss.com
 %%%----------------------------------------------------------------------
 -module(errdb).
 
 -author('ery.lee@gmail.com').
 
 -include_lib("elog/include/elog.hrl").
-
--import(extbif, [to_list/1]).
-
--import(lists, [concat/1,reverse/1]).
 
 -import(proplists, [get_value/2, get_value/3]).
 
@@ -24,12 +20,11 @@
         last/1,
 		last/2,
         fetch/4,
-        insert/3,
-        delete/1]).
+        insert/3]).
 
 -behavior(gen_server).
 
--export([start_link/2]).
+-export([start_link/1]).
 
 -export([init/1, 
         handle_call/3,
@@ -40,16 +35,16 @@
         terminate/2,
         code_change/3]).
 
--record(state, {dbtab, journal, store, cache, threshold = 1, timeout, dbdir}).
+-record(state, {dbtab, journal, store, cache, threshold = 1}).
 
--record(errdb, {key, first=0, last=0, timer, rows=[]}). %fields = [], 
+-record(errdb, {key, first=0, last=0, rows=[]}). %fields = [], 
 
 %%--------------------------------------------------------------------
 %% Function: start_link() -> {ok,Pid} | ignore | {error,Error}
 %% Description: Starts the server
 %%--------------------------------------------------------------------
-start_link(Id, Opts) ->
-    gen_server2:start_link({local, name(Id)}, ?MODULE, [Id, Opts],
+start_link(Id) ->
+    gen_server2:start_link({local, name(Id)}, ?MODULE, [Id],
 		[{spawn_opt, [{min_heap_size, 4096}]}]).
 
 name(Id) ->
@@ -69,19 +64,17 @@ last(Key, Fields) when is_list(Key)
     gen_server2:call(Pid, {last, Key, Fields}).
 
 fetch(Key, Fields, Begin, End) when
-	is_list(Key) and is_list(Fields) 
-	and is_integer(Begin) and is_integer(End) ->
+	is_list(Key), is_list(Fields), 
+	is_integer(Begin), is_integer(End),
+    Begin =< End ->
 	Pid = chash_pg:get_pid(?MODULE, Key),
-    case gen_server2:call(Pid, {fetch, Key, Fields}) of
-	{ok, DataInMem, DbDir} -> 
-		case rpc:call(node(Pid), errdb_store, read, [DbDir, Key, Fields]) of
+    case gen_server2:call(Pid, {fetch, Key}) of
+	{ok, DataInMem, StorePid} -> 
+		case errdb_store:read(StorePid, Key, Begin, End) of
 		{ok, DataInFile} ->
-			Filter = fun(L) -> filter(Begin, End, L) end,
-			YData = [{Field, Filter(Values)} || {Field, Values} 
-						<- merge(Fields, DataInFile, DataInMem)],
-			XData = errdb_lib:transform(YData),
-			Values = fun(L) -> [get_value(F, L) || F <- Fields] end,
-			{ok, lists:sort([{Time, Values(Row)} || {Time, Row} <- XData])};
+			Rows = [Row || {T, _} = Row <- DataInMem++DataInFile,
+                                    T >= Begin, T =< End],
+			{ok, lists:sort([{Time, values(Fields, Record)} || {Time, Record} <- Rows])};
 		{error, Reason} ->
 			{error, Reason}
 		end;
@@ -89,20 +82,11 @@ fetch(Key, Fields, Begin, End) when
 		{error, Reason1}
 	end.
 
-merge(Fields, Data1, Data2) ->
-	Values1 = fun(F) -> get_value(F, Data1, []) end,
-	Values2 = fun(F) -> get_value(F, Data2, []) end,
-	[{F, Values1(F) ++ Values2(F)} || F <- Fields].
-
 %metrics: [{k, v}, {k, v}...]
 insert(Key, Time, Metrics) when is_list(Key) 
 	and is_integer(Time) and is_list(Metrics) ->
     gen_server2:cast(chash_pg:get_pid(?MODULE, Key), 
 		{insert, Key, Time, Metrics}).
-
-delete(Key) when is_list(Key) ->
-    Pid = chash_pg:get_pid(?MODULE, Key),
-    gen_server2:cast(Pid, {delete, Key}).
 
 %%--------------------------------------------------------------------
 %% Function: init(Args) -> {ok, State} |
@@ -111,35 +95,33 @@ delete(Key) when is_list(Key) ->
 %%                         {stop, Reason}
 %% Description: Initiates the server
 %%--------------------------------------------------------------------
-init([Id, Opts]) ->
+init([Id]) ->
 	random:seed(now()),
     process_flag(trap_exit, true),
-    {value, Dir} = dataset:get_value(dir, Opts),
-	{value, VNodes} = dataset:get_value(vnodes, Opts, 40),
-	Timeout = get_value(timeout, Opts, 48)*3600*1000,
-    %start store process
-	DbDir = Dir ++ "/" ++ integer_to_list(Id),
-    {ok, Store} = errdb_store:start_link(Id, DbDir),
-
-    %start journal process
-    JournalOpts = proplists:get_value(journal, Opts),
-    {ok, Journal} = errdb_journal:start_link(Id, JournalOpts),
+    {ok, Opts} = application:get_env(rrdb),
 
     DbTab = ets:new(dbtab(Id), [set, protected, 
-        named_table, {keypos, 2}]),
+                    named_table, {keypos, 2}]),
 
+    %start store process
+    {ok, Store} = errdb_store:start_link(Id),
+
+    %start journal process
+    {ok, Journal} = errdb_journal:start_link(Id),
+
+	VNodes = get_value(vnodes, Opts, 40),
     chash_pg:create(errdb),
     chash_pg:join(errdb, self(), name(Id), VNodes),
 
-    CacheSize = proplists:get_value(cache, Opts),
+    CacheSize = get_value(cache, Opts, 12),
     ?INFO("~p is started.~n ", [name(Id)]),
 
     erlang:send_after(1000, self(), cron),
 
-    {ok, #state{dbtab = DbTab, dbdir = DbDir,
-		store = Store, journal = Journal,
-		cache = CacheSize,
-		timeout = Timeout}}.
+    {ok, #state{dbtab = DbTab,
+                store = Store,
+                journal = Journal,
+                cache = CacheSize}}.
 
 %%--------------------------------------------------------------------
 %% Function: %% handle_call(Request, From, State) -> {reply, Reply, State} |
@@ -153,6 +135,7 @@ init([Id, Opts]) ->
 handle_call(info, _From, #state{store=Store, journal=Journal} = State) ->
     Reply = [errdb_misc:pinfo(self()), 
             errdb_misc:pinfo(Store),
+            errdb_store:info(Store),
             errdb_misc:pinfo(Journal)],
     {reply, Reply, State};
     
@@ -167,7 +150,7 @@ handle_call({last, Key}, _From, #state{dbtab = DbTab} = State) ->
     end,
     {reply, Reply, State};
 
-handle_call({last, Key, Fields}, _From, #state{dbtab = DbTab} = State) ->
+handle_call({last, Key, Fields}, _From, #state{dbtab=DbTab} = State) ->
     Reply = 
     case ets:lookup(DbTab, Key) of
     [#errdb{rows=[{Time, Metrics}|_]}] -> 
@@ -177,16 +160,10 @@ handle_call({last, Key, Fields}, _From, #state{dbtab = DbTab} = State) ->
     end,
     {reply, Reply, State};
 
-handle_call({fetch, Key, Fields}, _From, 
-	#state{dbdir= DbDir, dbtab = DbTab} = State) ->
+handle_call({fetch, Key}, _From, #state{store=Store, dbtab=DbTab} = State) ->
     case ets:lookup(DbTab, Key) of
     [#errdb{rows=Rows}] -> 
-		Data = lists:map(fun(Field) -> 
-			Value = fun(Row) -> get_value(Field, Row) end,
-			Values = [{T, Value(Row)} || {T, Row} <- Rows],
-			{Field, lists:sort(Values)}
-		end, Fields),
-		{reply, {ok, Data, DbDir}, State};
+		{reply, {ok, Rows, Store}, State};
     [] -> 
         {reply, {error, notfound}, State}
     end;
@@ -217,19 +194,17 @@ check_time(Last, Time) ->
 %%--------------------------------------------------------------------
 handle_cast({insert, Key, Time, Metrics}, #state{dbtab = DbTab, 
     journal = Journal, store = Store, cache = CacheSize,
-	timeout = Timeout, threshold = Threshold} = State) ->
+    threshold = Threshold} = State) ->
     Result =
     case ets:lookup(DbTab, Key) of
-    [#errdb{last=Last, rows=Rows, timer=Timer} = OldRecord] ->
+    [#errdb{last=Last, rows=Rows} = OldRecord] ->
         case check_time(Last, Time) of
         true ->
             case length(Rows) >= (CacheSize+Threshold) of
             true ->
-				NewTimer = reset_timer(Timer, Key, Timeout),
-                Columns = errdb_lib:transform(reverse(Rows)),
-                errdb_store:write(Store, Key, Columns),
+                errdb_store:write(Store, Key, lists:reverse(Rows)),
                 {ok, OldRecord#errdb{first = Time, last = Time, 
-					timer = NewTimer, rows = [{Time, Metrics}]}};
+					rows = [{Time, Metrics}]}};
             false ->
                 {ok, OldRecord#errdb{last = Time, rows = [{Time, Metrics}|Rows]}}
             end;
@@ -249,23 +224,10 @@ handle_cast({insert, Key, Time, Metrics}, #state{dbtab = DbTab,
     end,
     {noreply, State};
 
-handle_cast({delete, Key}, #state{store = Store, dbtab = DbTab} = State) ->
-    errdb_store:delete(Store, Key),
-    ets:delete(DbTab, Key),
-    {noreply, State};
-
 handle_cast(Msg, State) ->
     ?ERROR("badmsg: ~p", [Msg]),
     {noreply, State}.
 
-%TODO: DEPRECATED CODE???
-handle_info({'EXIT', _Pid, normal}, State) ->
-    %Reader pid is normaly down 
-    {noreply, State};
-
-handle_info({timeout, Key}, State) ->
-	handle_cast({delete, Key}, State);
-    
 handle_info(cron, #state{cache = CacheSize} = State) ->
     Threshold = random:uniform(CacheSize),
     erlang:send_after(1000, self(), cron),
@@ -277,10 +239,6 @@ handle_info(Info, State) ->
 
 priorities_info(cron, _State) ->
     11;
-priorities_info({read_rep,_,_}, _State) ->
-    10;
-priorities_info({read_timeout,_,_}, _State) ->
-    10;
 priorities_info(_, _) ->
     1.
 %%--------------------------------------------------------------------
@@ -303,19 +261,5 @@ code_change(_OldVsn, State, _Extra) ->
 values(Fields, Metrics) ->
 	[get_value(F, Metrics) || F <- Fields].
 
-filter(Begin, End, List) ->
-    [E || {Time, _} = E <- List, Time >= Begin, Time =< End].
-
 dbtab(Id) ->
     list_to_atom("errdb_" ++ integer_to_list(Id)).
-
-reset_timer(Ref, Key, Timeout) ->
-	cancel_timer(Ref),
-	erlang:send_after(Timeout, self(), {timeout, Key}).
-
-cancel_timer(undefined) ->
-    ok;
-
-cancel_timer(Ref) ->
-    (catch erlang:cancel_timer(Ref)).
-

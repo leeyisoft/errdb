@@ -91,11 +91,6 @@ handle_req({"fetch", Object, Fields, Begin, End}) ->
         {reply, ["ERROR:", atom_to_list(Reason), "\r\n"]}
 	end;
 
-
-handle_req({"delete", Key}) ->
-    ok = errdb:delete(Key),
-    noreply;
-
 handle_req(Req) ->
     ?ERROR("badreq: ~p", [Req]),
 	{stop, badreq}.

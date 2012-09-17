@@ -13,12 +13,14 @@
 
 -import(extbif, [timestamp/0, zeropad/1]).
 
+-import(proplists, [get_value/2, get_value/3]).
+
 -include_lib("elog/include/elog.hrl").
 
 -behavior(gen_server).
 
 -export([name/1,
-        start_link/2, 
+        start_link/1, 
         info/1,
         write/4]).
 
@@ -40,8 +42,9 @@ name(Id) when is_integer(Id) ->
 %% Function: start_link() -> {ok,Pid} | ignore | {error,Error}
 %% Description: Starts the server
 %%--------------------------------------------------------------------
-start_link(Id, Opts) ->
-    gen_server2:start_link({local, name(Id)}, ?MODULE, [Id, Opts], [{spawn_opt, [{min_heap_size, 20480}]}]).
+start_link(Id) ->
+    gen_server2:start_link({local, name(Id)}, ?MODULE, [Id],
+                [{spawn_opt, [{min_heap_size, 20480}]}]).
 
 info(Pid) ->
     gen_server2:call(Pid, info).
@@ -56,10 +59,11 @@ write(Pid, Key, Time, Metrics) ->
 %%                         {stop, Reason}
 %% Description: Initiates the server
 %%--------------------------------------------------------------------
-init([Id, Opts]) ->
+init([Id]) ->
 	random:seed(now()),
-    Dir = proplists:get_value(dir, Opts),
-    BufferSize = proplists:get_value(buffer, Opts, 100),
+    {ok, Opts} = application:get_env(journal),
+    Dir = get_value(dir, Opts),
+    BufferSize = get_value(buffer, Opts, 100),
 	BufferSize1 = BufferSize + random:uniform(BufferSize),
     ?INFO("~p buffer_size: ~p", [name(Id), BufferSize1]),
     State = #state{id = Id, logdir = Dir, buffer_size = BufferSize1},
@@ -183,12 +187,10 @@ flush_queue(File, Q) ->
     flush_to_disk(File, Q).
 
 flush_to_disk(LogFile, Q) ->
-    Lines = [ [line(Key, Metric, Ts, Value) 
-				|| {Metric, Value} <- Metrics] 
-					|| {Key, Ts, Metrics} <- lists:reverse(Q)],
+    Lines = [line(Record) || Record <- lists:reverse(Q)],
     file:write(LogFile, list_to_binary(Lines)).
 
-line(Key, Metric, Time, Value) ->
-    list_to_binary([Key, "|", Metric, "|", integer_to_list(Time),
-		"|", errdb_lib:str(Value), "\n"]).
+line({Key, Time, Metrics}) ->
+    Line = string:join([lists:concat([M, "=", errdb_lib:str(V)]) || {M, V} <- Metrics], "|"),
+    list_to_binary([Key, "@", integer_to_list(Time), ":", Line, "\n"]).
 
