@@ -145,7 +145,7 @@ handle_info(Info, State) ->
     {noreply, State}.
 
 emit_metrics() ->
-    Time = get(commit_time),
+    Time = get(commit_time) div 1000,
     Count = get(commit_count),
     case Count > 0 of
     true ->
@@ -156,7 +156,7 @@ emit_metrics() ->
     end,
     case Time > 0 of
     true ->
-        folsom_metrics:notify({'journal.commit_time', {inc,  Time div 1000}}),
+        folsom_metrics:notify({'journal.commit_time', {inc,  Time}}),
         put(commit_time, 0);
     false ->
         ignore

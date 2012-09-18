@@ -60,6 +60,12 @@ name(Id) ->
     list_to_atom("errdb_store_" ++ integer_to_list(Id)).
 
 read(Pid, Key, Begin, End) ->
+    {Time, Result} = timer:tc(fun do_read/4, [Pid, Key, Begin, End]),
+    folsom_metrics:notify({'store.read_count', {inc, 1}}),
+    folsom_metrics:notify({'store.read_time', {inc, Time div 1000}}),
+    Result.
+
+do_read(Pid, Key, Begin, End) ->
     case gen_server:call(Pid, {read, Key, Begin, End}) of
     {ok, IdxList} ->
         DataList = 
