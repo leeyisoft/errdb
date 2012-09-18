@@ -12,7 +12,7 @@
 
 metrics() ->
     Nodes = [node() | nodes()],
-    ?PRINT("errdb metrics: ~n", []),
+    %?PRINT("errdb metrics: ~n", []),
     lists:foreach(fun(N) -> 
         Metrics = rpc:call(N, errdb_app, metrics, []),
         ?PRINT("~p~n", [{N, Metrics}])
