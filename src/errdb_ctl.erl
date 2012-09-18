@@ -10,6 +10,14 @@
 
 -compile(export_all).
 
+metrics() ->
+    Nodes = [node() | nodes()],
+    ?PRINT("errdb metrics: ~n", []),
+    lists:foreach(fun(N) -> 
+        Metrics = rpc:call(N, errdb_app, metrics, []),
+        ?PRINT("~p~n", [{N, Metrics}])
+    end, Nodes).
+
 sockets() ->
     ActiveSockets = mochiweb_socket_server:get(errdb_socket, active_sockets),
     ?PRINT("Total Client Sockets: ~p~n", [ActiveSockets]).

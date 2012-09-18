@@ -29,6 +29,7 @@ loop(Req) ->
 	handle(Method, Path, Req).
 
 handle('GET', {"rrdb", Key, "last"}, Req) ->
+    folsom_metrics:notify({'http.last', {inc, 1}}),
 	case errdb:last(unquote(Key)) of
     {ok, Time, Fields, Values} ->
         Resp = ["TIME:", join(Fields, ","), "\n", errdb_lib:line(Time, Values)],
@@ -39,6 +40,7 @@ handle('GET', {"rrdb", Key, "last"}, Req) ->
 	end;
 
 handle('GET', {"rrdb", RawKey, "last", RawFields}, Req) ->
+    folsom_metrics:notify({'http.last', {inc, 1}}),
 	Key = unquote(RawKey),
 	Fields = unquote(RawFields),
 	case errdb:last(Key, tokens(Fields, ",")) of
@@ -51,6 +53,7 @@ handle('GET', {"rrdb", RawKey, "last", RawFields}, Req) ->
 	end;
 
 handle('GET', {"rrdb", RawKey, RawFields, RawRange}, Req) ->
+    folsom_metrics:notify({'http.fetch', {inc, 1}}),
 	Key = unquote(RawKey),
 	Fields = unquote(RawFields),
 	Range = unquote(RawRange),

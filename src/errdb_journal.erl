@@ -60,6 +60,8 @@ write(Pid, Key, Time, Metrics) ->
 %% Description: Initiates the server
 %%--------------------------------------------------------------------
 init([Id]) ->
+    put(commit_count, 0),
+    put(commit_time, 0),
 	random:seed(now()),
     {ok, Opts} = application:get_env(journal),
     Dir = get_value(dir, Opts),
@@ -102,8 +104,7 @@ handle_cast({write, Key, Time, Metrics}, #state{logfile = LogFile,
     buffer_size = MaxSize, queue = Q} = State) ->
     case length(Q) >= MaxSize of
     true ->
-        incr(commit),
-        flush_to_disk(LogFile, [{Key, Time, Metrics}|Q]),
+        flush_queue(LogFile,[{Key, Time, Metrics}|Q]), 
         {noreply, State#state{queue = []}};
     false ->
         NewQ = [{Key, Time, Metrics} | Q],
@@ -133,13 +134,33 @@ handle_info(journal_rotation, #state{id = Id, logdir = Dir, logfile = File, queu
     {noreply, State#state{logfile = NewFile, thishour = Hour, queue = []}};
 
 handle_info(flush_queue, #state{logfile = File, queue = Q} = State) ->
+    %TODO: send metrics here.
     flush_queue(File, Q),
+    emit_metrics(),
     erlang:send_after(2000, self(), flush_queue),
     {noreply, State#state{queue = []}};
 
 handle_info(Info, State) ->
     ?ERROR("badinfo: ~p", [Info]),
     {noreply, State}.
+
+emit_metrics() ->
+    Time = get(commit_time),
+    Count = get(commit_count),
+    case Count > 0 of
+    true ->
+        folsom_metrics:notify({'journal.commit_count', {inc, Count}}),
+        put(commit_count, 0);
+    false ->
+        ignore
+    end,
+    case Time > 0 of
+    true ->
+        folsom_metrics:notify({'journal.commit_time', {inc,  Time div 1000}}),
+        put(commit_time, 0);
+    false ->
+        ignore
+    end.
 
 priorities_info(journal_rotation, _State) ->
     10;
@@ -167,12 +188,6 @@ code_change(_OldVsn, State, _Extra) ->
 %%--------------------------------------------------------------------
 %%% Internal functions
 %%--------------------------------------------------------------------
-incr(Key) ->
-    case get(Key) of
-    undefined -> put(Key, 1);
-    V -> put(Key, V+1)
-    end.
-
 close_file(undefined) ->
     ok;
 
@@ -184,7 +199,9 @@ flush_queue(undefined, _Q) ->
 flush_queue(_File, Q) when length(Q) == 0 ->
     ok;
 flush_queue(File, Q) ->
-    flush_to_disk(File, Q).
+    {Time, _} = timer:tc(fun flush_to_disk/2, [File, Q]),
+    errdb_misc:incr(commit_count, 1),
+    errdb_misc:incr(commit_time, Time).
 
 flush_to_disk(LogFile, Q) ->
     Lines = [line(Record) || Record <- lists:reverse(Q)],

@@ -13,6 +13,9 @@ case "$1" in
             errdb/ebin \
             errdb/bin errdb/etc \
             errdb/log errdb/var \
+            errdb/lib/bear/ebin \
+            errdb/lib/meck/ebin \
+            errdb/lib/folsom/ebin \
             errdb/lib/elog/ebin \
             errdb/lib/extlib/ebin \
             errdb/lib/lager/ebin \
@@ -23,6 +26,9 @@ case "$1" in
         tar czvf errdb/errdb-$VSN-$DATE-$1.tgz \
             errdb/ebin \
             errdb/bin \
+            errdb/lib/bear/ebin \
+            errdb/lib/meck/ebin \
+            errdb/lib/folsom/ebin \
             errdb/lib/elog/ebin \
             errdb/lib/extlib/ebin \
             errdb/lib/lager/ebin \

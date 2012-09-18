@@ -3,7 +3,8 @@
 -export([pinfo/1,
         dropdot/1,
         version_compare/2,
-        version_compare/3]).
+        version_compare/3,
+        incr/2]).
 
 version_compare(A, B, lte) ->
     case version_compare(A, B) of
@@ -53,3 +54,11 @@ pinfo(Pid) ->
 		{{Name, node()}, Info}
 	end.
 
+incr(Name, Val) ->
+    case get(Name) of
+    undefined ->
+        put(Name, Val);
+    OldVal ->
+        put(Name, OldVal+Val)
+    end.
+    

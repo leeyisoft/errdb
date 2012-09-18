@@ -97,7 +97,9 @@ insert(Key, Time, Metrics) when is_list(Key)
 %%--------------------------------------------------------------------
 init([Id]) ->
 	random:seed(now()),
-    process_flag(trap_exit, true),
+    put(fetch, 0),
+    put(insert, 0),
+    %process_flag(trap_exit, true),
     {ok, Opts} = application:get_env(rrdb),
 
     DbTab = ets:new(dbtab(Id), [set, protected, 
@@ -160,6 +162,7 @@ handle_call({last, Key, Fields}, _From, #state{dbtab=DbTab} = State) ->
     {reply, Reply, State};
 
 handle_call({fetch, Key}, _From, #state{store=Store, dbtab=DbTab} = State) ->
+    errdb_misc:incr(fetch, 1),
     case ets:lookup(DbTab, Key) of
     [#errdb{rows=Rows}] -> 
 		{reply, {ok, Rows, Store}, State};
@@ -194,6 +197,7 @@ check_time(Last, Time) ->
 handle_cast({insert, Key, Time, Metrics}, #state{dbtab = DbTab, 
     journal = Journal, store = Store, cache = CacheSize,
     threshold = Threshold} = State) ->
+    errdb_misc:incr(insert, 1),
     Result =
     case ets:lookup(DbTab, Key) of
     [#errdb{last=Last, rows=Rows} = OldRecord] ->
@@ -228,6 +232,7 @@ handle_cast(Msg, State) ->
     {noreply, State}.
 
 handle_info(cron, #state{cache = CacheSize} = State) ->
+    emit_metrics(),
     Threshold = random:uniform(CacheSize),
     erlang:send_after(1000, self(), cron),
     {noreply, State#state{threshold = Threshold}};
@@ -240,6 +245,13 @@ priorities_info(cron, _State) ->
     11;
 priorities_info(_, _) ->
     1.
+
+emit_metrics() ->
+    folsom_metrics:notify({'errdb.insert', {inc, get(insert)}}),
+    put(insert, 0),
+    folsom_metrics:notify({'errdb.fetch', {inc, get(fetch)}}),
+    put(fetch, 0).
+    
 %%--------------------------------------------------------------------
 %% Function: terminate(Reason, State) -> void()
 %% Description: This function is called by a gen_server when it is about to

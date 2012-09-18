@@ -24,7 +24,6 @@
 -behavior(gen_server).
 
 -export([start_link/1,
-        info/1,
 		name/1,
         read/4, 
         write/3]).
@@ -37,7 +36,7 @@
         terminate/2,
         code_change/3]).
 
--define(DAY, 86400).
+-define(DAY, 3600). %86400).
 
 -define(RRDB_VER, <<"RRDB0003">>).
 
@@ -90,9 +89,6 @@ read(Pid, Key, Begin, End) ->
 
 write(Pid, Key, Rows) when length(Rows) > 0 ->
     gen_server2:cast(Pid, {write, Key, Rows}).
-
-info(Pid) ->
-    gen_server2:call(Pid, info).
 
 %%--------------------------------------------------------------------
 %% Function: init(Args) -> {ok, State} |
@@ -179,20 +175,6 @@ datafile(Dir, Name) ->
 %%                                      {stop, Reason, State}
 %% Description: Handling call messages
 %%--------------------------------------------------------------------
-handle_call(info, _From, State) ->
-    WCount = get(write_count),
-    Write = get(write_time),
-    Reply = [{write_count, WCount},
-             {write_time, Write}],
-    Reply1 =
-    if
-    WCount > 0 -> 
-        [{write_avg, Write div WCount} | Reply];
-    true -> 
-        Reply
-    end,
-    {reply, Reply1, State};
-
 handle_call({read, Key, Begin, End}, _From, #state{db = DB, hdbs = HDBS} = State) ->
     %beginIdx is bigger than endidx
     {BeginIdx, EndIdx} = dayidx(Begin, End, State),
@@ -205,8 +187,6 @@ handle_call({read, Key, Begin, End}, _From, #state{db = DB, hdbs = HDBS} = State
 handle_call(Req, _From, State) ->
     {stop, {error, {badreq, Req}}, State}.
 
-priorities_call(info, _From, _State) ->
-    10;
 priorities_call({read, _Key, _Begin, _End}, _From, _State) ->
     10;
 priorities_call(_, _From, _State) ->
@@ -221,12 +201,7 @@ priorities_call(_, _From, _State) ->
 handle_cast({write, Key, Rows}, #state{db=DB, buffer=Buffer, queue=Queue} = State) ->
     case length(Queue) >= Buffer of
     true ->
-        %FIXME LATER:
-        T1 = now(),
-        flush_to_disk(DB, lists:reverse(Queue)),
-        T2 = now(),
-        incr(write_count, 1),
-        incr(write_time, timer:now_diff(T2, T1)),
+        flush_queue(DB, Queue),
         {noreply, State#state{queue=[]}};
     false ->
         NewQueue = [{Key, Rows}|Queue],
@@ -239,19 +214,16 @@ handle_cast(Msg, State) ->
 handle_info(flush_queue, #state{db=DB, queue=Queue} = State) ->
     case length(Queue) > 0 of
     true ->
-        %FIXME LATER:
-        T1 = now(),
-        flush_to_disk(DB, lists:reverse(Queue)),
-        T2 = now(),
-        incr(write_count, 1),
-        incr(write_time, timer:now_diff(T2,T1));
+        flush_queue(DB, Queue);
     false ->
         ignore
     end,
+    emit_metrics(),
     erlang:send_after(1000, self(), flush_queue),
     {noreply, State#state{queue=[]}};
 
 handle_info(rotate, #state{id = Id, dir = DbDir, db=OldDB, hdbs = HDBS} = State) ->
+    ?INFO("rotate at ~p", [{date(), time()}]),
     %create new db
     Now = extbif:timestamp(),
     Today = (Now div ?DAY),
@@ -330,16 +302,33 @@ flush_to_disk(DB, Queue) ->
     end.
 
 sched_daily_rotate() ->
-    Ts1 = extbif:timestamp(),
-    Ts2 = (Ts1 div ?DAY + 1) * ?DAY,
-    Delta = (Ts2 + 1 - Ts1) * 1000,
+    Now = extbif:timestamp(),
+    NextDay = (Now div ?DAY + 1) * ?DAY,
+    Delta = (NextDay + 1 - Now) * 1000,
     erlang:send_after(Delta, self(), rotate).
 
-incr(Key, Val) ->
-    NewVal =
-    case get(Key) of
-    undefined -> Val;
-    OldVal -> OldVal + Val
+flush_queue(_DB, []) ->
+    ignore;
+flush_queue(DB, Queue) ->
+    {Time, _} = timer:tc(fun flush_to_disk/2, [DB, lists:reverse(Queue)]),
+    errdb_misc:incr(write_count, 1),
+    errdb_misc:incr(write_time, Time).
+
+emit_metrics() ->
+    Time = get(write_time) div 1000,
+    Count = get(write_count),
+    if
+    Time > 0 ->
+        folsom_metrics:notify({'store.write_time', {inc, Time}}),
+        put(write_time, 0);
+    true ->
+        ignore
     end,
-    put(Key, NewVal).
+    if
+    Count > 0 ->
+        folsom_metrics:notify({'store.write_count', {inc, Count}}),
+        put(write_count, 0);
+    true ->
+        ingore
+    end.
 

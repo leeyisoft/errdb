@@ -11,6 +11,8 @@
 
 -export([start/0]).
 
+-export([metrics/0]).
+
 -behavior(application).
 %callback
 -export([start/2, stop/1]).
@@ -18,9 +20,13 @@
 start() ->
 	application:start(errdb).
 
+metrics() ->
+    [{M, folsom_metrics:get_metric_value(M)} 
+        || M <- folsom_metrics:get_metrics()].
+
 start(_Type, _Args) ->
 	[application:start(App) || App <- 
-		[sasl, crypto, extlib, elog, evmon]],
+		[sasl, crypto, extlib, elog, evmon, folsom]],
     case erts_version_check() of
     ok ->
         {ok, SupPid} = errdb_sup:start_link(),
