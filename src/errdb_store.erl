@@ -260,7 +260,7 @@ dayidx(Begin, End, #state{today=Today, days=Days}) ->
     if
     BeginDelta =< 0 -> 1;
     BeginDelta > Days -> Days; %only two days
-    BeginDelta -> BeginDelta+1
+    true -> BeginDelta+1
     end,
     {BeginIdx, EndIdx}.
 

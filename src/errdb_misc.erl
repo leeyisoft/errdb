@@ -45,7 +45,7 @@ dropdot(A) -> lists:dropwhile(fun (X) -> X =:= $. end, A).
 
 pinfo(Pid) ->
     Props = [registered_name, message_queue_len, memory,
-        total_heap_size, heap_size, reductions, dictionary],
+        total_heap_size, heap_size, reductions],
 	case process_info(Pid, Props) of
 	undefined ->
 		{{undefined, node()}, [undefined]};

@@ -2,7 +2,7 @@
 
 DATE=`date +%Y%m%d`
 
-VSN=3.0
+VSN=3.0.1
 
 cd ..
 

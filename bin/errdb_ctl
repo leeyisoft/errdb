@@ -149,6 +149,7 @@ case "$1" in
         echo "Usage: $SCRIPT"
 		echo "		status       	#query errdb status"
 		echo "		sockets       	#query errdb sockets"
+		echo "		metrics       	#query errdb metrics"
 		echo "		cluster_info    #query cluster nodes"
 		echo "		cluster <Node>	#cluster node"
         exit 1
