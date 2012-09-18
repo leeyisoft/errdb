@@ -36,7 +36,7 @@
         terminate/2,
         code_change/3]).
 
--define(DAY, 3600). %86400).
+-define(DAY, 86400).
 
 -define(RRDB_VER, <<"RRDB0003">>).
 
