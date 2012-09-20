@@ -36,7 +36,7 @@
         terminate/2,
         code_change/3]).
 
--define(DAY, 3600). %86400).
+-define(DAY, 86400). %3600).
 
 -define(RRDB_VER, <<"RRDB0003">>).
 
@@ -76,19 +76,7 @@ do_read(Pid, Key, Begin, End) ->
             {ok, Fd} ->
                 case file:pread(Fd, Indices) of
                 {ok, DataL} ->
-                    Result=
-                    lists:map(fun(Data) -> 
-                        try binary_to_term(Data) of
-                        Rows -> Rows
-                        catch
-                        _:Err ->
-                            ?ERROR("~p: ~s ", [Err, DataFile]),
-                            ?ERROR("~p", [Indices]),
-                            []
-                        end
-                    end, DataL),
-                    {ok, Result};
-                    %{ok, [binary_to_term(Data) || Data <- DataL]};
+                    {ok, [binary_to_term(Data) || Data <- DataL]};
                 eof -> 
                     {ok, []};
                 {error, Reason} -> 
