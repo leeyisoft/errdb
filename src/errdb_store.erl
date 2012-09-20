@@ -36,7 +36,7 @@
         terminate/2,
         code_change/3]).
 
--define(DAY, 86400).
+-define(DAY, 3600). %86400).
 
 -define(RRDB_VER, <<"RRDB0003">>).
 
@@ -66,15 +66,29 @@ read(Pid, Key, Begin, End) ->
     Result.
 
 do_read(Pid, Key, Begin, End) ->
-    case gen_server:call(Pid, {read, Key, Begin, End}) of
+    case gen_server:call(Pid, {read_idx, Key, Begin, End}) of
     {ok, IdxList} ->
+        ?INFO("do read: ~s", [Key]),
+        ?INFO("~p", [IdxList]),
         DataList = 
         lists:map(fun({DataFile, Indices}) -> 
             case file:open(DataFile, [read | ?OPEN_MODES]) of
             {ok, Fd} ->
                 case file:pread(Fd, Indices) of
                 {ok, DataL} ->
-                    {ok, [binary_to_term(Data) || Data <- DataL]};
+                    Result=
+                    lists:map(fun(Data) -> 
+                        try binary_to_term(Data) of
+                        Rows -> Rows
+                        catch
+                        _:Err ->
+                            ?ERROR("~p: ~s ", [Err, DataFile]),
+                            ?ERROR("~p", [Indices]),
+                            []
+                        end
+                    end, DataL),
+                    {ok, Result};
+                    %{ok, [binary_to_term(Data) || Data <- DataL]};
                 eof -> 
                     {ok, []};
                 {error, Reason} -> 
@@ -181,9 +195,10 @@ datafile(Dir, Name) ->
 %%                                      {stop, Reason, State}
 %% Description: Handling call messages
 %%--------------------------------------------------------------------
-handle_call({read, Key, Begin, End}, _From, #state{db = DB, hdbs = HDBS} = State) ->
+handle_call({read_idx, Key, Begin, End}, _From, #state{db = DB, hdbs = HDBS} = State) ->
     %beginIdx is bigger than endidx
     {BeginIdx, EndIdx} = dayidx(Begin, End, State),
+    ?INFO("read_idx: ~s ~p", [Key, {BeginIdx, EndIdx}]),
     DbInRange = lists:sublist([DB|HDBS], EndIdx, (BeginIdx-EndIdx+1)), 
     IdxList = [{DataFile, [Idx || {_K, Idx} <- dets:lookup(IdxRef, Key)]} 
                     || #db{index={IdxRef, _}, data={_, DataFile}} <- DbInRange],
@@ -193,7 +208,7 @@ handle_call({read, Key, Begin, End}, _From, #state{db = DB, hdbs = HDBS} = State
 handle_call(Req, _From, State) ->
     {stop, {error, {badreq, Req}}, State}.
 
-priorities_call({read, _Key, _Begin, _End}, _From, _State) ->
+priorities_call({read_idx, _Key, _Begin, _End}, _From, _State) ->
     10;
 priorities_call(_, _From, _State) ->
     0.
@@ -218,18 +233,14 @@ handle_cast(Msg, State) ->
     {stop, {error, {badcast, Msg}}, State}.
 
 handle_info(flush_queue, #state{db=DB, queue=Queue} = State) ->
-    case length(Queue) > 0 of
-    true ->
-        flush_queue(DB, Queue);
-    false ->
-        ignore
-    end,
+    flush_queue(DB, Queue),
     emit_metrics(),
     erlang:send_after(1000, self(), flush_queue),
     {noreply, State#state{queue=[]}};
 
-handle_info(rotate, #state{id = Id, dir = DbDir, db=OldDB, hdbs = HDBS} = State) ->
+handle_info(rotate, #state{id = Id, dir = DbDir, db=OldDB, hdbs = HDBS, queue=Queue} = State) ->
     ?INFO("rotate at ~p", [{date(), time()}]),
+    flush_queue(OldDB, Queue),
     %create new db
     Now = extbif:timestamp(),
     Today = (Now div ?DAY),
@@ -239,7 +250,7 @@ handle_info(rotate, #state{id = Id, dir = DbDir, db=OldDB, hdbs = HDBS} = State)
     NewHDBS = [OldDB | lists:sublist(HDBS, 1, length(HDBS)-1)],
     %rotation 
     sched_daily_rotate(),
-    {noreply, State#state{today = Today, db = NewDB, hdbs = NewHDBS}};
+    {noreply, State#state{today = Today, db = NewDB, hdbs = NewHDBS, queue=[]}};
 
 handle_info(Info, State) ->
     {stop, {error, {badinfo, Info}}, State}.
@@ -275,7 +286,7 @@ close(#db{index={IdxRef, IdxFile}, data={DataFd, DataFile}}, Type) ->
     dets:close(IdxRef),
     file:close(DataFd),
     case Type of
-    delete ->
+    deleted ->
         spawn(fun() -> 
             [begin 
                 Res = file:delete(File),
@@ -292,7 +303,7 @@ code_change(_OldVsn, State, _Extra) ->
 flush_to_disk(DB, Queue) ->
     #db{index={IdxRef, _}, data={DataFd, _}} = DB,
     {ok, Pos} = file:position(DataFd, eof),
-    {_, Indices, DataList} = 
+    {_LastPos, Indices, DataList} = 
     lists:foldl(fun({Key, Rows}, {PosAcc, IdxAcc, DataAcc})  -> 
         Data = term_to_binary(Rows, [compressed]),        
         Size = size(Data),
@@ -300,8 +311,10 @@ flush_to_disk(DB, Queue) ->
         {PosAcc+Size, [Idx|IdxAcc], [Data|DataAcc]}
     end, {Pos, [], []}, Queue),
     Data = list_to_binary(lists:reverse(DataList)),
+    %?INFO("Pos: ~p, LastPos: ~p, Size: ~p", [Pos, LastPos, size(Data)]),
     case file:write(DataFd, Data) of
     ok ->
+        %?INFO("write indices: ~p", [Indices]),
         dets:insert(IdxRef, Indices);
     {error, Reason} ->
         ?ERROR("~p", [Reason])
@@ -310,6 +323,7 @@ flush_to_disk(DB, Queue) ->
 sched_daily_rotate() ->
     Now = extbif:timestamp(),
     NextDay = (Now div ?DAY + 1) * ?DAY,
+    %?INFO("will rotate at: ~p", [extbif:datetime(NextDay)]),
     Delta = (NextDay + 1 - Now) * 1000,
     erlang:send_after(Delta, self(), rotate).
 

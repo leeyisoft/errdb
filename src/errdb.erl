@@ -70,7 +70,7 @@ fetch(Key, Fields, Begin, End) when
 	Pid = chash_pg:get_pid(?MODULE, Key),
     case gen_server2:call(Pid, {fetch, Key}) of
 	{ok, DataInMem, StorePid} -> 
-		case errdb_store:read(StorePid, Key, Begin, End) of
+		case rpc:call(node(Pid), errdb_store, read, [StorePid, Key, Begin, End]) of
 		{ok, DataInFile} ->
 			Rows = [Row || {T, _} = Row <- DataInMem++DataInFile,
                                     T >= Begin, T =< End],
