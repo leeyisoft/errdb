@@ -5,7 +5,7 @@
 %%% Created : 03 Apr. 2010
 %%% License : http://www.opengoss.com
 %%%
-%%% Copyright (C) 2011, www.opengoss.com
+%%% Copyright (C) 2012, www.opengoss.com
 %%%----------------------------------------------------------------------
 -module(errdb_journal).
 
@@ -21,12 +21,10 @@
 
 -export([name/1,
         start_link/1, 
-        info/1,
         write/4]).
 
 -export([init/1, 
         handle_call/3, 
-        priorities_call/3,
         handle_cast/2,
         handle_info/2,
         priorities_info/2,
@@ -45,9 +43,6 @@ name(Id) when is_integer(Id) ->
 start_link(Id) ->
     gen_server2:start_link({local, name(Id)}, ?MODULE, [Id],
                 [{spawn_opt, [{min_heap_size, 20480}]}]).
-
-info(Pid) ->
-    gen_server2:call(Pid, info).
 
 write(Pid, Key, Time, Metrics) ->
     gen_server2:cast(Pid, {write, Key, Time, Metrics}).
@@ -83,16 +78,9 @@ init([Id]) ->
 %%                                      {stop, Reason, State}
 %% Description: Handling call messages
 %%--------------------------------------------------------------------
-handle_call(info, _From, #state{thishour = H} = State) ->
-    Info = [{hour, H} | get()],
-    {reply, {ok, Info}, State};
-    
 handle_call(Req, _From, State) ->
     ?ERROR("badreq: ~p", [Req]),
     {reply, {error, badreq}, State}.
-
-priorities_call(info, _From, _State) ->
-    3.
 
 %%--------------------------------------------------------------------
 %% Function: handle_cast(Msg, State) -> {noreply, State} |
@@ -120,7 +108,9 @@ handle_cast(_Msg, State) ->
 %%                                       {stop, Reason, State}
 %% Description: Handling all non call/cast messages
 %%--------------------------------------------------------------------
-handle_info(journal_rotation, #state{id = Id, logdir = Dir, logfile = File, queue = Q} = State) ->
+handle_info(journal_rotation, #state{id = Id,
+    logdir = Dir, logfile = File, queue = Q} = State) ->
+
     flush_queue(File, Q),
     close_file(File),
     Now = timestamp(),
@@ -134,8 +124,8 @@ handle_info(journal_rotation, #state{id = Id, logdir = Dir, logfile = File, queu
     {noreply, State#state{logfile = NewFile, thishour = Hour, queue = []}};
 
 handle_info(flush_queue, #state{logfile = File, queue = Q} = State) ->
-    %TODO: send metrics here.
     flush_queue(File, Q),
+    %TODO: send metrics here.
     emit_metrics(),
     erlang:send_after(2000, self(), flush_queue),
     {noreply, State#state{queue = []}};

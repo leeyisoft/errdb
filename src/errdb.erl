@@ -96,9 +96,9 @@ insert(Key, Time, Metrics) when is_list(Key)
 %% Description: Initiates the server
 %%--------------------------------------------------------------------
 init([Id]) ->
-	random:seed(now()),
     put(fetch, 0),
     put(insert, 0),
+	random:seed(now()),
     %process_flag(trap_exit, true),
     {ok, Opts} = application:get_env(rrdb),
 
@@ -135,7 +135,7 @@ init([Id]) ->
 %% Description: Handling call messages
 %%--------------------------------------------------------------------
 handle_call(info, _From, #state{store=Store, journal=Journal} = State) ->
-    Reply = [errdb_misc:pinfo(self()), 
+    Reply = [errdb_misc:pinfo(self()),
             errdb_misc:pinfo(Store),
             errdb_misc:pinfo(Journal)],
     {reply, Reply, State};
@@ -180,7 +180,7 @@ priorities_call({last, _}, _From, _State) ->
     10;
 priorities_call({last, _, _}, _From, _State) ->
     10;
-priorities_call({fetch, _, _, _}, _From, _State) ->
+priorities_call({fetch, _}, _From, _State) ->
     10;
 priorities_call(_, _From, _State) ->
     0.

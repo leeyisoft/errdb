@@ -41,10 +41,10 @@
 		connected/3]).
 
 -define(TCP_OPTIONS, [binary, 
-    {packet, line}, 
-    {active, true}, 
-    {reuseaddr, true}, 
-    {send_timeout, 3000}]).
+        {packet, line}, 
+        {active, true}, 
+        {reuseaddr, true}, 
+        {send_timeout, 3000}]).
 
 -define(TIMEOUT, 3000).
 
