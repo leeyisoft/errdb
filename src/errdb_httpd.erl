@@ -24,51 +24,51 @@ stop() ->
 
 loop(Req) ->
     Method = Req:get(method),
-	?INFO("~s ~s", [Method, Req:get(raw_path)]),
-	Path = list_to_tuple(string:tokens(Req:get(raw_path), "/")),
-	handle(Method, Path, Req).
+    ?INFO("~s ~s", [Method, Req:get(raw_path)]),
+    Path = list_to_tuple(string:tokens(Req:get(raw_path), "/")),
+    handle(Method, Path, Req).
 
 handle('GET', {"rrdb", Key, "last"}, Req) ->
     folsom_metrics:notify({'http.last', {inc, 1}}),
-	case errdb:last(unquote(Key)) of
+    case errdb:last(unquote(Key)) of
     {ok, Time, Fields, Values} ->
         Resp = ["TIME:", join(Fields, ","), "\n", errdb_lib:line(Time, Values)],
         Req:ok({"text/plain", Resp});
     {error, Reason} ->
-		?WARNING("~s ~p", [Req:get(raw_path), Reason]),
+        ?WARNING("~s ~p", [Req:get(raw_path), Reason]),
         Req:respond({500, [], atom_to_list(Reason)})
-	end;
+    end;
 
 handle('GET', {"rrdb", RawKey, "last", RawFields}, Req) ->
     folsom_metrics:notify({'http.last', {inc, 1}}),
-	Key = unquote(RawKey),
-	Fields = unquote(RawFields),
-	case errdb:last(Key, tokens(Fields, ",")) of
-    {ok, Time, Values} -> 
+    Key = unquote(RawKey),
+    Fields = unquote(RawFields),
+    case errdb:last(Key, tokens(Fields, ",")) of
+    {ok, Time, Values} ->
         Resp = ["TIME:", Fields, "\n", errdb_lib:line(Time, Values)],
         Req:ok({"text/plain", Resp});
     {error, Reason} ->
-		?WARNING("~s ~p", [Req:get(raw_path), Reason]),
+        ?WARNING("~s ~p", [Req:get(raw_path), Reason]),
         Req:respond({500, [], atom_to_list(Reason)})
-	end;
+    end;
 
 handle('GET', {"rrdb", RawKey, RawFields, RawRange}, Req) ->
     folsom_metrics:notify({'http.fetch', {inc, 1}}),
-	Key = unquote(RawKey),
-	Fields = unquote(RawFields),
-	Range = unquote(RawRange),
+    Key = unquote(RawKey),
+    Fields = unquote(RawFields),
+    Range = unquote(RawRange),
     [Begin, End] = tokens(Range, "-"),
-	case errdb:fetch(Key, tokens(Fields, ","),
+    case errdb:fetch(Key, tokens(Fields, ","),
         list_to_integer(Begin), list_to_integer(End)) of
-    {ok, Records} -> 
+    {ok, Records} ->
         Lines = join([errdb_lib:line(Time, Values) || {Time, Values} <- Records], "\n"),
         Resp = ["TIME:", Fields, "\n", Lines],
         Req:ok({"text/plain", Resp});
     {error, Reason} ->
-		?WARNING("~s ~p", [Req:get(raw_path), Reason]),
+        ?WARNING("~s ~p", [Req:get(raw_path), Reason]),
         Req:respond({500, [], atom_to_list(Reason)})
-	end;
+    end;
 
 handle(_Other, _Path, Req) ->
-	Req:respond({404, [], <<"bad request, path not found.">>}). 
+    Req:respond({404, [], <<"bad request, path not found.">>}).
 

@@ -18,15 +18,15 @@
 -export([start/2, stop/1]).
 
 start() ->
-	application:start(errdb).
+    application:start(errdb).
 
 metrics() ->
-    [{M, folsom_metrics:get_metric_value(M)} 
+    [{M, folsom_metrics:get_metric_value(M)}
         || M <- folsom_metrics:get_metrics()].
 
 start(_Type, _Args) ->
-	[application:start(App) || App <- 
-		[sasl, crypto, extlib, elog, evmon, folsom]],
+    [application:start(App) || App <-
+        [sasl, crypto, extlib, lager, elog, evmon, folsom]],
     case erts_version_check() of
     ok ->
         {ok, SupPid} = errdb_sup:start_link(),
@@ -40,11 +40,11 @@ start(_Type, _Args) ->
 erts_version_check() ->
     FoundVer = erlang:system_info(version),
     case errdb_misc:version_compare(?ERTS_MINIMUM, FoundVer, lte) of
-	true  -> ok;
-	false -> {error, {erlang_version_too_old,
-					  {found, FoundVer}, {required, ?ERTS_MINIMUM}}}
+    true  -> ok;
+    false -> {error, {erlang_version_too_old,
+                      {found, FoundVer}, {required, ?ERTS_MINIMUM}}}
     end.
 
 stop(_State) ->
-	ok.
+    ok.
 

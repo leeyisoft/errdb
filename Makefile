@@ -1,14 +1,14 @@
 
 all: deps
-	./rebar compile
+    ./rebar3 compile
 
 deps:
-	./rebar get-deps
+    ./rebar3 get-deps
 
 dist:
-	rm -rf rel/errdb
-	./rebar generate
+    rm -rf _build/prod
+    ./rebar3 as prod tar
 
 clean:
-	./rebar clean
+    ./rebar3 clean
 

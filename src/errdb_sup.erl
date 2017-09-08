@@ -20,29 +20,28 @@ start_link() ->
 
 init([]) ->
     %rrdb cluster
-	Pool = 
-	case application:get_env(pool_size) of
-	{ok, schedulers} -> erlang:system_info(schedulers);
-	{ok, Val} when is_integer(Val) -> Val;
-	undefined -> erlang:system_info(schedulers)
-	end,
+    Pool = case application:get_env(pool_size) of
+        {ok, schedulers} -> erlang:system_info(schedulers);
+        {ok, Val} when is_integer(Val) -> Val;
+        undefined -> erlang:system_info(schedulers)
+    end,
     Errdbs = [worker(Id) || Id <- lists:seq(1, Pool)],
 
-	%% Httpd config
-	{ok, HttpdConf} = application:get_env(httpd), 
-	%% Httpd 
+    %% Httpd config
+    {ok, HttpdConf} = application:get_env(httpd),
+    %% Httpd
     Httpd = {errdb_httpd, {errdb_httpd, start, [HttpdConf]},
            permanent, 10, worker, [errdb_httpd]},
 
-	%% Socket config
-	{ok, SocketConf} = application:get_env(socket), 
-	%% Socket
+    %% Socket config
+    {ok, SocketConf} = application:get_env(socket),
+    %% Socket
     Socket = {errdb_socket, {errdb_socket, start, [SocketConf]},
            permanent, 10, worker, [errdb_socket]},
 
     {ok, {{one_for_one, 10, 1000}, Errdbs ++ [Httpd, Socket]}}.
 
 worker(Id) ->
-	{errdb:name(Id), {errdb, start_link, [Id]},
-	   permanent, 5000, worker, [errdb]}.
+    {errdb:name(Id), {errdb, start_link, [Id]},
+       permanent, 5000, worker, [errdb]}.
 

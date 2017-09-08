@@ -17,3 +17,4 @@ var
 lib/bear/
 lib/folsom/
 lib/meck
+_build/*

@@ -1,7 +1,7 @@
 %%%----------------------------------------------------------------------
 %%% File    : errdb.erl
 %%% Author  : Ery Lee <ery.lee@gmail.com>
-%%% Purpose : 
+%%% Purpose :
 %%% Created : 03 Apr. 2010
 %%% License : http://www.opengoss.com
 %%%
@@ -16,9 +16,9 @@
 -import(proplists, [get_value/2, get_value/3]).
 
 -export([name/1,
-		info/0,
+        info/0,
         last/1,
-		last/2,
+        last/2,
         fetch/4,
         insert/3]).
 
@@ -26,7 +26,7 @@
 
 -export([start_link/1]).
 
--export([init/1, 
+-export([init/1,
         handle_call/3,
         priorities_call/3,
         handle_cast/2,
@@ -37,7 +37,7 @@
 
 -record(state, {dbtab, journal, store, cache, threshold = 1}).
 
--record(errdb, {key, first=0, last=0, rows=[]}). %fields = [], 
+-record(errdb, {key, first=0, last=0, rows=[]}). %fields = [],
 
 %%--------------------------------------------------------------------
 %% Function: start_link() -> {ok,Pid} | ignore | {error,Error}
@@ -45,10 +45,10 @@
 %%--------------------------------------------------------------------
 start_link(Id) ->
     gen_server2:start_link({local, name(Id)}, ?MODULE, [Id],
-		[{spawn_opt, [{min_heap_size, 4096}]}]).
+        [{spawn_opt, [{min_heap_size, 4096}]}]).
 
 name(Id) ->
-	list_to_atom("errdb_" ++ integer_to_list(Id)).
+    list_to_atom("errdb_" ++ integer_to_list(Id)).
 
 info() ->
     Pids = chash_pg:get_pids(errdb),
@@ -59,34 +59,34 @@ last(Key) when is_list(Key) ->
     gen_server2:call(Pid, {last, Key}).
 
 last(Key, Fields) when is_list(Key)
-	and is_list(Fields) ->
-	Pid = chash_pg:get_pid(?MODULE, Key),
+    and is_list(Fields) ->
+    Pid = chash_pg:get_pid(?MODULE, Key),
     gen_server2:call(Pid, {last, Key, Fields}).
 
 fetch(Key, Fields, Begin, End) when
-	is_list(Key), is_list(Fields), 
-	is_integer(Begin), is_integer(End),
+    is_list(Key), is_list(Fields),
+    is_integer(Begin), is_integer(End),
     Begin =< End ->
-	Pid = chash_pg:get_pid(?MODULE, Key),
+    Pid = chash_pg:get_pid(?MODULE, Key),
     case gen_server2:call(Pid, {fetch, Key}) of
-	{ok, DataInMem, StorePid} -> 
-		case rpc:call(node(Pid), errdb_store, read, [StorePid, Key, Begin, End]) of
-		{ok, DataInFile} ->
-			Rows = [Row || {T, _} = Row <- DataInMem++DataInFile,
+    {ok, DataInMem, StorePid} ->
+        case rpc:call(node(Pid), errdb_store, read, [StorePid, Key, Begin, End]) of
+        {ok, DataInFile} ->
+            Rows = [Row || {T, _} = Row <- DataInMem++DataInFile,
                                     T >= Begin, T =< End],
-			{ok, lists:sort([{Time, values(Fields, Record)} || {Time, Record} <- Rows])};
-		{error, Reason} ->
-			{error, Reason}
-		end;
-	{error, Reason1} ->
-		{error, Reason1}
-	end.
+            {ok, lists:sort([{Time, values(Fields, Record)} || {Time, Record} <- Rows])};
+        {error, Reason} ->
+            {error, Reason}
+        end;
+    {error, Reason1} ->
+        {error, Reason1}
+    end.
 
 %metrics: [{k, v}, {k, v}...]
-insert(Key, Time, Metrics) when is_list(Key) 
-	and is_integer(Time) and is_list(Metrics) ->
-    gen_server2:cast(chash_pg:get_pid(?MODULE, Key), 
-		{insert, Key, Time, Metrics}).
+insert(Key, Time, Metrics) when is_list(Key)
+    and is_integer(Time) and is_list(Metrics) ->
+    gen_server2:cast(chash_pg:get_pid(?MODULE, Key),
+        {insert, Key, Time, Metrics}).
 
 %%--------------------------------------------------------------------
 %% Function: init(Args) -> {ok, State} |
@@ -98,11 +98,11 @@ insert(Key, Time, Metrics) when is_list(Key)
 init([Id]) ->
     put(fetch, 0),
     put(insert, 0),
-	random:seed(now()),
+    random:seed(now()),
     %process_flag(trap_exit, true),
     {ok, Opts} = application:get_env(rrdb),
 
-    DbTab = ets:new(dbtab(Id), [set, protected, 
+    DbTab = ets:new(dbtab(Id), [set, protected,
                     named_table, {keypos, 2}]),
 
     %start store process
@@ -111,7 +111,7 @@ init([Id]) ->
     %start journal process
     {ok, Journal} = errdb_journal:start_link(Id),
 
-	VNodes = get_value(vnodes, Opts, 40),
+    VNodes = get_value(vnodes, Opts, 40),
     chash_pg:create(errdb),
     chash_pg:join(errdb, self(), name(Id), VNodes),
 
@@ -139,22 +139,22 @@ handle_call(info, _From, #state{store=Store, journal=Journal} = State) ->
             errdb_misc:pinfo(Store),
             errdb_misc:pinfo(Journal)],
     {reply, Reply, State};
-    
+
 handle_call({last, Key}, _From, #state{dbtab = DbTab} = State) ->
-    Reply = 
+    Reply =
     case ets:lookup(DbTab, Key) of
-    [#errdb{rows=[{Time, Metrics}|_]}] -> 
-		{Fields, Values} = lists:unzip(Metrics),	
+    [#errdb{rows=[{Time, Metrics}|_]}] ->
+        {Fields, Values} = lists:unzip(Metrics),
         {ok, Time, Fields, Values};
-    [] -> 
+    [] ->
         {error, notfound}
     end,
     {reply, Reply, State};
 
 handle_call({last, Key, Fields}, _From, #state{dbtab=DbTab} = State) ->
-    Reply = 
+    Reply =
     case ets:lookup(DbTab, Key) of
-    [#errdb{rows=[{Time, Metrics}|_]}] -> 
+    [#errdb{rows=[{Time, Metrics}|_]}] ->
         {ok, Time, Fields, values(Fields, Metrics)};
     [] ->
         {error, notfound}
@@ -164,9 +164,9 @@ handle_call({last, Key, Fields}, _From, #state{dbtab=DbTab} = State) ->
 handle_call({fetch, Key}, _From, #state{store=Store, dbtab=DbTab} = State) ->
     errdb_misc:incr(fetch, 1),
     case ets:lookup(DbTab, Key) of
-    [#errdb{rows=Rows}] -> 
-		{reply, {ok, Rows, Store}, State};
-    [] -> 
+    [#errdb{rows=Rows}] ->
+        {reply, {ok, Rows, Store}, State};
+    [] ->
         {reply, {error, notfound}, State}
     end;
 
@@ -194,7 +194,7 @@ check_time(Last, Time) ->
 %%                                      {stop, Reason, State}
 %% Description: Handling cast messages
 %%--------------------------------------------------------------------
-handle_cast({insert, Key, Time, Metrics}, #state{dbtab = DbTab, 
+handle_cast({insert, Key, Time, Metrics}, #state{dbtab = DbTab,
     journal = Journal, store = Store, cache = CacheSize,
     threshold = Threshold} = State) ->
     errdb_misc:incr(insert, 1),
@@ -206,8 +206,8 @@ handle_cast({insert, Key, Time, Metrics}, #state{dbtab = DbTab,
             case length(Rows) >= (CacheSize+Threshold) of
             true ->
                 errdb_store:write(Store, Key, lists:reverse(Rows)),
-                {ok, OldRecord#errdb{first = Time, last = Time, 
-					rows = [{Time, Metrics}]}};
+                {ok, OldRecord#errdb{first = Time, last = Time,
+                    rows = [{Time, Metrics}]}};
             false ->
                 {ok, OldRecord#errdb{last = Time, rows = [{Time, Metrics}|Rows]}}
             end;
@@ -251,7 +251,7 @@ emit_metrics() ->
     put(insert, 0),
     folsom_metrics:notify({'errdb.fetch', {inc, get(fetch)}}),
     put(fetch, 0).
-    
+
 %%--------------------------------------------------------------------
 %% Function: terminate(Reason, State) -> void()
 %% Description: This function is called by a gen_server when it is about to
@@ -270,7 +270,7 @@ code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 
 values(Fields, Metrics) ->
-	[get_value(F, Metrics) || F <- Fields].
+    [get_value(F, Metrics) || F <- Fields].
 
 dbtab(Id) ->
     list_to_atom("errdb_" ++ integer_to_list(Id)).

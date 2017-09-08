@@ -25,11 +25,11 @@
 
 -export([start_link/1,
 		name/1,
-        read/4, 
+        read/4,
         write/3]).
 
--export([init/1, 
-        handle_call/3, 
+-export([init/1,
+        handle_call/3,
         priorities_call/3,
         handle_cast/2,
         handle_info/2,
@@ -70,16 +70,16 @@ do_read(Pid, Key, Begin, End) ->
     {ok, IdxList} ->
         ?INFO("do read: ~s", [Key]),
         ?INFO("~p", [IdxList]),
-        DataList = 
-        lists:map(fun({DataFile, Indices}) -> 
+        DataList =
+        lists:map(fun({DataFile, Indices}) ->
             case file:open(DataFile, [read | ?OPEN_MODES]) of
             {ok, Fd} ->
                 case file:pread(Fd, Indices) of
                 {ok, DataL} ->
                     {ok, [binary_to_term(Data) || Data <- DataL]};
-                eof -> 
+                eof ->
                     {ok, []};
-                {error, Reason} -> 
+                {error, Reason} ->
                     ?ERROR("pread ~p error: ~p", [DataFile, Reason]),
                     {error, Reason}
                 end;
@@ -126,10 +126,10 @@ init([Id]) ->
 
     %flush queue to disk
     erlang:send_after(Id*3000, self(), flush_queue),
-    
+
     ?INFO("~p is started.", [name(Id)]),
-    {ok, #state{id = Id, name = name(Id), dir = DbDir, 
-                buffer = Buffer+random:uniform(Buffer), 
+    {ok, #state{id = Id, name = name(Id), dir = DbDir,
+                buffer = Buffer+random:uniform(Buffer),
                 today = Today, days = Days,
                 db = DB, hdbs = HDBS}}.
 
@@ -153,7 +153,7 @@ open(Type, Dir, Ts, Id) ->
     end.
 
 opendb(Name, IdxFile, DataFile) ->
-    ?INFO("opendb ~s ", [Name]),
+    % ?INFO("opendb ~s ", [Name]),
     IdxRef = list_to_atom("index_"++Name),
     {ok, IdxRef} = dets:open_file(IdxRef, [{file, IdxFile}, {type, bag}]),
     {ok, DataFd} = file:open(DataFile, [read, write, append | ?OPEN_MODES]),
@@ -187,8 +187,8 @@ handle_call({read_idx, Key, Begin, End}, _From, #state{db = DB, hdbs = HDBS} = S
     %beginIdx is bigger than endidx
     {BeginIdx, EndIdx} = dayidx(Begin, End, State),
     ?INFO("read_idx: ~s ~p", [Key, {BeginIdx, EndIdx}]),
-    DbInRange = lists:sublist([DB|HDBS], EndIdx, (BeginIdx-EndIdx+1)), 
-    IdxList = [{DataFile, [Idx || {_K, Idx} <- dets:lookup(IdxRef, Key)]} 
+    DbInRange = lists:sublist([DB|HDBS], EndIdx, (BeginIdx-EndIdx+1)),
+    IdxList = [{DataFile, [Idx || {_K, Idx} <- dets:lookup(IdxRef, Key)]}
                     || #db{index={IdxRef, _}, data={_, DataFile}} <- DbInRange],
     Reply = {ok, [ E || {_, Indices} = E <- IdxList, Indices =/= []]},
     {reply, Reply, State};
@@ -236,7 +236,7 @@ handle_info(rotate, #state{id = Id, dir = DbDir, db=OldDB, hdbs = HDBS, queue=Qu
     %close oldest db
     close(lists:last(HDBS), deleted),
     NewHDBS = [OldDB | lists:sublist(HDBS, 1, length(HDBS)-1)],
-    %rotation 
+    %rotation
     sched_daily_rotate(),
     {noreply, State#state{today = Today, db = NewDB, hdbs = NewHDBS, queue=[]}};
 
@@ -261,7 +261,7 @@ dayidx(Begin, End, #state{today=Today, days=Days}) ->
     end,
 
     BeginDelta = Today - BeginDay,
-    BeginIdx = 
+    BeginIdx =
     if
     BeginDelta =< 0 -> 1;
     BeginDelta > Days -> Days; %only two days
@@ -275,10 +275,10 @@ close(#db{index={IdxRef, IdxFile}, data={DataFd, DataFile}}, Type) ->
     file:close(DataFd),
     case Type of
     deleted ->
-        spawn(fun() -> 
-            [begin 
+        spawn(fun() ->
+            [begin
                 Res = file:delete(File),
-                ?INFO("delete ~s: ~p", [File, Res]) 
+                ?INFO("delete ~s: ~p", [File, Res])
              end || File <- [DataFile, IdxFile]]
         end);
     _ ->
@@ -291,9 +291,9 @@ code_change(_OldVsn, State, _Extra) ->
 flush_to_disk(DB, Queue) ->
     #db{index={IdxRef, _}, data={DataFd, _}} = DB,
     {ok, Pos} = file:position(DataFd, eof),
-    {_LastPos, Indices, DataList} = 
-    lists:foldl(fun({Key, Rows}, {PosAcc, IdxAcc, DataAcc})  -> 
-        Data = term_to_binary(Rows, [compressed]),        
+    {_LastPos, Indices, DataList} =
+    lists:foldl(fun({Key, Rows}, {PosAcc, IdxAcc, DataAcc})  ->
+        Data = term_to_binary(Rows, [compressed]),
         Size = size(Data),
         Idx = {Key, {PosAcc, Size}},
         {PosAcc+Size, [Idx|IdxAcc], [Data|DataAcc]}

@@ -30,10 +30,21 @@ Errdb生成的Journal文件在WLAN网管中，会通过定时任务导入到Orac
 # Errdb编译
 
 Errdb采用rebar编译
+```
+mkdir -p var var/data
 
-* make (编译)
-* make clean (清除)
-* make dist (发布包生成在rel/errdb下)
+rebar3 dialyzer
+
+rebar3 compile (编译)
+rebar3 clean (清除)
+rebar3 as product release (发布)
+rebar3 as prod tar
+
+rebar3 clean && rebar3 compile && erl -boot start_sasl -pa _build/default/lib/*/ebin -config etc/errdb.config
+
+observer:start().
+application:start(errdb).
+```
 
 # Errdb文件存储
 
